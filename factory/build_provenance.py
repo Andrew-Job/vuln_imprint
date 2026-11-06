@@ -11,7 +11,6 @@ from pathlib import Path
 
 from .toolchains import probe_compiler, ToolchainMismatch
 
-
 ARTIFACTS = ('module.o', 'libcomponent.a', 'host_0', 'host_1')
 
 
@@ -20,7 +19,8 @@ def file_digest(path: Path) -> str:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
-def write_record(directory: Path, toolchain: dict, commands: list[list[str]]) -> dict:
+def write_record(directory: Path, toolchain: dict,
+                 commands: list[list[str]]) -> dict:
     directory = Path(directory)
     source_file = directory / 'source-provenance.json'
     if source_file.is_file():
@@ -45,8 +45,8 @@ def write_record(directory: Path, toolchain: dict, commands: list[list[str]]) ->
         'commands': commands,
         'artifacts': artifacts,
     }
-    (directory / 'build-provenance.json').write_text(
-        json.dumps(record, indent=2, sort_keys=True) + '\n')
+    (directory / 'build-provenance.json'
+    ).write_text(json.dumps(record, indent=2, sort_keys=True) + '\n')
     return record
 
 
@@ -57,23 +57,26 @@ def verify_record(directory: Path, source: dict, toolchain: dict) -> dict:
     if not path.is_file():
         raise ToolchainMismatch('build-provenance.json is required')
     record = json.loads(path.read_text())
-    if (record.get('schema_version') != 1 or record.get('source') != source
-            or record.get('source_provenance_sha256') != file_digest(
-                directory / 'source-provenance.json')
-            or record.get('toolchain') != toolchain):
-        raise ToolchainMismatch('build provenance differs from verified source or toolchain')
+    if (record.get('schema_version') != 1 or record.get('source') != source or
+            record.get('source_provenance_sha256') != file_digest(
+                directory / 'source-provenance.json') or
+            record.get('toolchain') != toolchain):
+        raise ToolchainMismatch(
+            'build provenance differs from verified source or toolchain')
     compiler = probe_compiler(toolchain['requested_executable'],
                               expected_major=toolchain['major'],
                               expected_version=toolchain['version'],
                               optimization=toolchain['optimization'])
-    if (compiler['binary_sha256'] != toolchain['binary_sha256']
-            or compiler['target'] != toolchain['target']):
+    if (compiler['binary_sha256'] != toolchain['binary_sha256'] or
+            compiler['target'] != toolchain['target']):
         raise ToolchainMismatch('compiler changed since build')
     if not isinstance(record.get('commands'), list) or not record['commands']:
         raise ToolchainMismatch('executed build commands are not recorded')
-    if not isinstance(record.get('artifacts'), dict) or set(record['artifacts']) != set(ARTIFACTS):
+    if not isinstance(record.get('artifacts'), dict) or set(
+            record['artifacts']) != set(ARTIFACTS):
         raise ToolchainMismatch('build artifact coverage incomplete')
     for name, digest in record['artifacts'].items():
         if file_digest(directory / name) != digest:
-            raise ToolchainMismatch(f'build artifact changed after compilation: {name}')
+            raise ToolchainMismatch(
+                f'build artifact changed after compilation: {name}')
     return record

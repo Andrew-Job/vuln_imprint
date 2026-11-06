@@ -19,12 +19,18 @@ def is_independent_holdout(samples: Iterable) -> bool:
     """
     samples = list(samples)
     holdouts = [sample for sample in samples if sample.split == 'holdout']
-    if not holdouts or any(not sample.provenance.get('lineage') for sample in holdouts):
+    if not holdouts or any(
+            not sample.provenance.get('lineage') for sample in holdouts):
         return False
     prior = [sample for sample in samples if sample.split != 'holdout']
-    prior_lineages = {str(sample.provenance['lineage']) for sample in prior
-                      if sample.provenance.get('lineage')}
-    holdout_lineages = {str(sample.provenance['lineage']) for sample in holdouts}
+    prior_lineages = {
+        str(sample.provenance['lineage'])
+        for sample in prior
+        if sample.provenance.get('lineage')
+    }
+    holdout_lineages = {
+        str(sample.provenance['lineage']) for sample in holdouts
+    }
     if prior_lineages & holdout_lineages:
         return False
     # File-content comparison is mandatory; lineage strings alone are claims.

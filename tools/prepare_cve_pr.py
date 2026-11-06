@@ -48,39 +48,56 @@ def prepare(case: Path, scanner: Path, repo: Path) -> dict:
         raise ReleaseRejected("canonical validated tree is missing")
     target = signatures / cve
     if target.exists() or target.is_symlink():
-        raise ReleaseRejected(f"{cve} already exists; edit it in a branch and rerun PR CI")
+        raise ReleaseRejected(
+            f"{cve} already exists; edit it in a branch and rerun PR CI")
 
     original_digests = {name: sha256(case / name) for name in REQUIRED}
     target.mkdir()
     try:
         for name in REQUIRED:
             if sha256(case / name) != original_digests[name]:
-                raise ReleaseRejected(f"case input changed during validation: {name}")
+                raise ReleaseRejected(
+                    f"case input changed during validation: {name}")
             shutil.copyfile(case / name, target / name)
             if sha256(target / name) != original_digests[name]:
                 raise ReleaseRejected(f"copied source digest mismatch: {name}")
         admitted = check(repo)
         if cve not in admitted:
-            raise ReleaseRejected(f"prepared CVE not admitted by canonical source gate: {cve}")
+            raise ReleaseRejected(
+                f"prepared CVE not admitted by canonical source gate: {cve}")
     except BaseException:
         shutil.rmtree(target)
         raise
-    return {"status": "READY_FOR_REVIEW", "cve": cve,
-            "source_files": {name: original_digests[name] for name in REQUIRED},
-            "independent_samples": len(evidence["samples"]),
-            "canonical_directory": str(target)}
+    return {
+        "status": "READY_FOR_REVIEW",
+        "cve": cve,
+        "source_files": {
+            name: original_digests[name] for name in REQUIRED
+        },
+        "independent_samples": len(evidence["samples"]),
+        "canonical_directory": str(target)
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--case", type=Path, required=True,
+    parser.add_argument("--case",
+                        type=Path,
+                        required=True,
                         help="reviewed CVE case with actual holdout specimens")
-    parser.add_argument("--scanner", type=Path, required=True,
+    parser.add_argument("--scanner",
+                        type=Path,
+                        required=True,
                         help="real C++ VulnImprint/YARA-X executable")
-    parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--repo",
+                        type=Path,
+                        default=Path(__file__).resolve().parents[1])
     args = parser.parse_args(argv)
     try:
-        print(json.dumps(prepare(args.case, args.scanner, args.repo), indent=2, sort_keys=True))
+        print(
+            json.dumps(prepare(args.case, args.scanner, args.repo),
+                       indent=2,
+                       sort_keys=True))
     except (ReleaseRejected, OSError, ValueError, TypeError, KeyError) as exc:
         parser.exit(2, f"CVE PREPARATION REJECTED: {exc}\n")
     return 0

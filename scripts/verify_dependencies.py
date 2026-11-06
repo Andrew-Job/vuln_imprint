@@ -20,9 +20,10 @@ HEX40 = re.compile(r"[0-9a-f]{40}\Z")
 
 
 def git(*args: str) -> str:
-    return subprocess.run(
-        ["git", "-C", str(ROOT), *args], check=True, capture_output=True, text=True
-    ).stdout.rstrip("\r\n")
+    return subprocess.run(["git", "-C", str(ROOT), *args],
+                          check=True,
+                          capture_output=True,
+                          text=True).stdout.rstrip("\r\n")
 
 
 def verify(*, require_checkout: bool = False) -> dict:
@@ -38,8 +39,10 @@ def verify(*, require_checkout: bool = False) -> dict:
     if not isinstance(expected_python, dict) or not expected_python:
         raise ValueError('missing pinned Factory parser dependencies')
     factory_requirements = (ROOT / 'requirements-factory.txt').read_text()
-    factory_pins = dict(re.findall(r'^([a-zA-Z0-9_-]+)==([^\s#]+)$',
-                                  factory_requirements, flags=re.MULTILINE))
+    factory_pins = dict(
+        re.findall(r'^([a-zA-Z0-9_-]+)==([^\s#]+)$',
+                   factory_requirements,
+                   flags=re.MULTILINE))
     if factory_pins != expected_python:
         raise ValueError('Factory dependency pins drift from dependency lock')
     rust = lock.get('rust_toolchain')
@@ -51,20 +54,23 @@ def verify(*, require_checkout: bool = False) -> dict:
     if (not all(isinstance(x, str) and x for x in (rust, cargo_c, maturin)) or
             toolchain.get('toolchain', {}).get('channel') != rust or
             f'rustup toolchain install {rust}' not in bootstrap or
-            f'cargo +{rust} install cargo-c --version {cargo_c}' not in bootstrap or
+            f'cargo +{rust} install cargo-c --version {cargo_c}'
+            not in bootstrap or
             f'export RUSTUP_TOOLCHAIN={rust}' not in python_builder or
             f"maturin=={maturin}" not in python_builder):
-        raise ValueError('Rust, cargo-c or maturin build pins drift from dependency lock')
+        raise ValueError(
+            'Rust, cargo-c or maturin build pins drift from dependency lock')
     sbom = lock.get('release_sbom_tool')
     if not isinstance(sbom, dict) or sbom.get('name') != 'syft':
         raise ValueError('pinned Syft SBOM tool missing')
     installer = (ROOT / 'scripts/install_syft.sh').read_text()
     if (f"version={sbom.get('version')}" not in installer or
             f"repo={sbom.get('repository')}" not in installer or
-            sbom.get('platform') != 'linux_amd64' or
-            sbom.get('verification') != 'github_immutable_release_attestation' or
+            sbom.get('platform') != 'linux_amd64' or sbom.get('verification')
+            != 'github_immutable_release_attestation' or
             'gh release verify-asset' not in installer):
-        raise ValueError('Syft release verification differs from dependency lock')
+        raise ValueError(
+            'Syft release verification differs from dependency lock')
     modules = (ROOT / ".gitmodules").read_text()
     for entry in entries:
         path = entry["path"]
@@ -73,14 +79,16 @@ def verify(*, require_checkout: bool = False) -> dict:
             raise ValueError(f"invalid pinned Git commit: {path}")
         if path.startswith("/") or ".." in Path(path).parts:
             raise ValueError("invalid Git submodule path")
-        actual_url = git("config", "-f", ".gitmodules", "--get", f"submodule.{path}.url")
+        actual_url = git("config", "-f", ".gitmodules", "--get",
+                         f"submodule.{path}.url")
         if actual_url != entry["url"] or entry["url"] not in modules:
             raise ValueError(f"unexpected submodule origin: {path}")
         status = git("ls-files", "--stage", "--", path).splitlines()
         if len(status) != 1:
             raise ValueError(f"missing Git submodule pointer: {path}")
         fields = status[0].split()
-        if len(fields) != 4 or fields[0] != "160000" or fields[1] != expected_sha or fields[3] != path:
+        if len(fields) != 4 or fields[0] != "160000" or fields[
+                1] != expected_sha or fields[3] != path:
             raise ValueError(f"gitlink does not match committed lock: {path}")
         if require_checkout:
             checkout = ROOT / path
@@ -88,7 +96,8 @@ def verify(*, require_checkout: bool = False) -> dict:
                 raise ValueError(f"submodule not cloned: {path}")
             head = git("-C", str(checkout), "rev-parse", "HEAD")
             if head != expected_sha:
-                raise ValueError(f"submodule checkout revision mismatch: {path}")
+                raise ValueError(
+                    f"submodule checkout revision mismatch: {path}")
             required = {
                 'external/yara-x': ('Cargo.lock', 'LICENSE'),
                 'external/elfio': ('elfio/elfio.hpp', 'LICENSE.txt'),
@@ -97,8 +106,10 @@ def verify(*, require_checkout: bool = False) -> dict:
                 raise ValueError(f'unknown unreviewed submodule: {path}')
             for filename in required:
                 if not (checkout / filename).is_file():
-                    raise ValueError(f'missing pinned upstream file: {path}/{filename}')
-            dirty = git("-C", str(checkout), "status", "--porcelain", "--untracked-files=no")
+                    raise ValueError(
+                        f'missing pinned upstream file: {path}/{filename}')
+            dirty = git("-C", str(checkout), "status", "--porcelain",
+                        "--untracked-files=no")
             if dirty:
                 raise ValueError(f"modified submodule checkout: {path}")
     if require_checkout:
@@ -110,15 +121,24 @@ def verify(*, require_checkout: bool = False) -> dict:
         observed_top = set()
         for line in recursive.splitlines():
             if not line or line[0] != ' ':
-                raise ValueError(f'uninitialized or mismatched recursive Git submodule: {line}')
+                raise ValueError(
+                    f'uninitialized or mismatched recursive Git submodule: {line}'
+                )
             fields = line[1:].split()
             if len(fields) < 2 or not HEX40.fullmatch(fields[0]):
-                raise ValueError(f'malformed recursive submodule status: {line}')
+                raise ValueError(
+                    f'malformed recursive submodule status: {line}')
             if fields[1] in top_paths:
                 observed_top.add(fields[1])
         if observed_top != top_paths:
-            raise ValueError(f'missing recursive submodule checkout: {top_paths - observed_top}')
-    return {"status": "PASS", "submodule_count": len(entries), "checkout_checked": require_checkout}
+            raise ValueError(
+                f'missing recursive submodule checkout: {top_paths - observed_top}'
+            )
+    return {
+        "status": "PASS",
+        "submodule_count": len(entries),
+        "checkout_checked": require_checkout
+    }
 
 
 def main() -> int:
@@ -126,9 +146,12 @@ def main() -> int:
     ap.add_argument("--require-checkout", action="store_true")
     args = ap.parse_args()
     try:
-        print(json.dumps(verify(require_checkout=args.require_checkout), sort_keys=True))
+        print(
+            json.dumps(verify(require_checkout=args.require_checkout),
+                       sort_keys=True))
         return 0
-    except (OSError, ValueError, subprocess.CalledProcessError, KeyError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, subprocess.CalledProcessError, KeyError,
+            json.JSONDecodeError) as exc:
         print(f"DEPENDENCY VERIFICATION FAILED: {exc}", file=sys.stderr)
         return 2
 

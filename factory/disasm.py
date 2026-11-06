@@ -35,7 +35,8 @@ def _clear_field(mask: bytearray, offset: int, size: int) -> bool:
     return True
 
 
-def mask_instruction(insn, relocations: list[tuple[int, int | None]]) -> Pattern | None:
+def mask_instruction(
+        insn, relocations: list[tuple[int, int | None]]) -> Pattern | None:
     """Mask precisely encoded relocations and address-dependent operands."""
     raw = bytes(insn.bytes)
     if not raw or len(raw) > 15:
@@ -64,7 +65,8 @@ def mask_instruction(insn, relocations: list[tuple[int, int | None]]) -> Pattern
     return Pattern(raw, bytes(mask))
 
 
-def disassemble(path: Path, symbols: list[str] | None = None,
+def disassemble(path: Path,
+                symbols: list[str] | None = None,
                 max_instructions: int = 150000) -> list[Instruction]:
     if max_instructions < 1:
         raise ValueError('max_instructions must be positive')
@@ -72,7 +74,8 @@ def disassemble(path: Path, symbols: list[str] | None = None,
     if elf.kind != 1 and not elf.sections:
         # Native Scanner may safely scan a stripped, sectionless ET_EXEC/DYN,
         # but Factory cannot safely mine relocation-aware masks from one.
-        raise UnsupportedBinary('sectionless linked ELF is not a safe mining input')
+        raise UnsupportedBinary(
+            'sectionless linked ELF is not a safe mining input')
     relocs = elf.relocations()
     scopes = elf.symbol_ranges(symbols) if symbols else None
     if scopes is not None and not scopes:
@@ -88,7 +91,8 @@ def disassemble(path: Path, symbols: list[str] | None = None,
         entries = sorted(relocs.get(name, []), key=lambda item: item[0])
         positions = [item[0] for item in entries]
         ranges = [(va, len(data))] if scopes is None else [
-            (start, size) for sec, start, size in scopes if sec == name]
+            (start, size) for sec, start, size in scopes if sec == name
+        ]
         for start, size in ranges:
             relative = start - va
             if relative < 0 or size < 1 or relative + size > len(data):
@@ -103,15 +107,19 @@ def disassemble(path: Path, symbols: list[str] | None = None,
                     insn_offset = offset + relative + decoded.address - start
                     key = (name, decoded.address)
                     lo = bisect_left(positions, int(decoded.address) - 15)
-                    hi = bisect_left(positions, int(decoded.address) + decoded.size)
+                    hi = bisect_left(positions,
+                                     int(decoded.address) + decoded.size)
                     normalized = mask_instruction(decoded, entries[lo:hi])
                     if normalized is not None and key not in seen:
-                        output.append(Instruction(name, decoded.address, insn_offset,
-                                                  bytes(decoded.bytes), normalized,
-                                                  f'{decoded.mnemonic} {decoded.op_str}'.strip()))
+                        output.append(
+                            Instruction(
+                                name, decoded.address, insn_offset,
+                                bytes(decoded.bytes), normalized,
+                                f'{decoded.mnemonic} {decoded.op_str}'.strip()))
                         seen.add(key)
                         if len(output) >= max_instructions:
-                            return sorted(output, key=lambda ins: ins.file_offset)
+                            return sorted(output,
+                                          key=lambda ins: ins.file_offset)
                     cursor = int(decoded.address) + decoded.size - start
                 # Capstone stops on invalid data; resume *after* the invalid
                 # byte. A gap breaks instruction-aligned pattern windows.

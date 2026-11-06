@@ -25,7 +25,8 @@ def create_validated_manual_signature(target, cve="CVE-2026-12345"):
     pack["status"] = "CVE_SPECIFIC_VALIDATED"
     pack_path.write_text(json.dumps(pack))
     rule_path = case / "rules-exec.yar"
-    rule_path.write_text(rule_path.read_text().replace("CANDIDATE_ONLY", "CVE_SPECIFIC_VALIDATED"))
+    rule_path.write_text(rule_path.read_text().replace(
+        "CANDIDATE_ONLY", "CVE_SPECIFIC_VALIDATED"))
     evidence = {
         "schema_version": 2,
         "cve": cve,
@@ -33,7 +34,10 @@ def create_validated_manual_signature(target, cve="CVE-2026-12345"):
         "pack_sha256": sha256(pack_path),
         "rules_sha256": sha256(rule_path),
         "training_lineages": ["independent-build-family-1"],
-        "samples": [{"label": "affected", "split": "independent_holdout"}],
+        "samples": [{
+            "label": "affected",
+            "split": "independent_holdout"
+        }],
     }
     (case / "reviewed-evidence.json").write_text(json.dumps(evidence))
     return case
@@ -87,16 +91,18 @@ def test_native_ci_requires_actual_corpus_when_git_contains_cves(tmp_path):
     create_validated_manual_signature(target)
     lock = tmp_path / "release"
     lock.mkdir()
-    (lock / "reviewed-corpus.lock.json").write_text(json.dumps({
-        "schema_version": 2, "archive_url": None, "archive_sha256": None,
-    }))
+    (lock / "reviewed-corpus.lock.json").write_text(
+        json.dumps({
+            "schema_version": 2,
+            "archive_url": None,
+            "archive_sha256": None,
+        }))
     with pytest.raises(ReleaseRejected, match="immutable HTTPS corpus URL"):
         run(tmp_path, tmp_path / "native-scanner", "reviewed.example.org")
 
 
-
-
-def test_release_assembly_contains_every_validated_git_cve(tmp_path, monkeypatch):
+def test_release_assembly_contains_every_validated_git_cve(
+        tmp_path, monkeypatch):
     """Exercise composition/integrity without substituting for native YARA-X CI."""
     from types import SimpleNamespace
     from tools import production_db
@@ -120,7 +126,10 @@ def test_release_assembly_contains_every_validated_git_cve(tmp_path, monkeypatch
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         if argv[1] == "verify":
             return SimpleNamespace(returncode=0,
-                                   stdout=json.dumps({"engine": "yara-x", "rules": 2}),
+                                   stdout=json.dumps({
+                                       "engine": "yara-x",
+                                       "rules": 2
+                                   }),
                                    stderr="")
         raise AssertionError(f"unexpected scanner command: {argv}")
 
@@ -130,9 +139,8 @@ def test_release_assembly_contains_every_validated_git_cve(tmp_path, monkeypatch
     assert result["cve_count"] == 2
     assert production_db.verify_release(output)["cve_count"] == 2
     index = json.loads((output / "index.json").read_text())
-    assert [entry["cve"] for entry in index["entries"]] == [
-        "CVE-2026-12345", "CVE-2026-67890"
-    ]
+    assert [entry["cve"] for entry in index["entries"]
+           ] == ["CVE-2026-12345", "CVE-2026-67890"]
     assert [call[1] for call in commands] == ["compile", "verify"]
 
 

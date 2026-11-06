@@ -17,7 +17,8 @@ def test_cas_record_cannot_read_outside_store(tmp_path):
     outside.write_bytes(b"outside CAS")
     attacker = copy.deepcopy(record)
     attacker["blob"]["path"] = "../../foreign.bin"
-    attacker["blob"]["digest"] = hashlib.sha256(outside.read_bytes()).hexdigest()
+    attacker["blob"]["digest"] = hashlib.sha256(
+        outside.read_bytes()).hexdigest()
     attacker["blob"]["size"] = outside.stat().st_size
     assert not store.verify(attacker)
 

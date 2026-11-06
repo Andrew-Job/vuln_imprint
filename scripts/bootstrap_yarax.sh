@@ -11,7 +11,8 @@ rustup toolchain install 1.99.1 --profile minimal
 cargo +1.99.1 install cargo-c --version 0.10.26 --locked
 (
     cd external/yara-x
-    cargo +1.99.1 cinstall -p yara-x-capi --release --locked --prefix "$YARAX_PREFIX"
+    cargo +1.99.1 cinstall -p yara-x-capi --release --locked --prefix "$YARAX_PREFIX" \
+        --libdir "$YARAX_PREFIX/lib"
 )
 export PKG_CONFIG_PATH="$YARAX_PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 export LD_LIBRARY_PATH="$YARAX_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"

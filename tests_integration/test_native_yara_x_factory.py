@@ -12,13 +12,11 @@ import pytest
 
 from factory import yara_engine
 
-
 MARKER = bytes.fromhex("48 83 EC 28 48 8B 05 12 34 56 78 48 85 C0")
 
 
 def test_factory_compiles_saves_loads_and_scans_executable_offsets(
-    tmp_path, monkeypatch
-):
+        tmp_path, monkeypatch):
     try:
         import yara_x  # noqa: F401 - fail if the required binding was not built
     except ImportError as exc:
@@ -29,16 +27,16 @@ def test_factory_compiles_saves_loads_and_scans_executable_offsets(
             pytrace=False,
         )
 
-    rules = yara_engine.source_from_packs(
-        [
-            {
-                "cve": "CVE-2099-56789",
-                "status": "RESEARCH_ONLY",
-                "platform": {"format": "ELF"},
-                "rules": [{"hex": MARKER.hex(" ")}],
-            }
-        ]
-    )
+    rules = yara_engine.source_from_packs([{
+        "cve": "CVE-2099-56789",
+        "status": "RESEARCH_ONLY",
+        "platform": {
+            "format": "ELF"
+        },
+        "rules": [{
+            "hex": MARKER.hex(" ")
+        }],
+    }])
     compiled = yara_engine.YaraXScanner.compile(rules)
     database = tmp_path / "database.yarc"
     compiled.save(database)
@@ -46,6 +44,7 @@ def test_factory_compiles_saves_loads_and_scans_executable_offsets(
     reloaded = yara_engine.YaraXScanner.load(database)
 
     class SyntheticElf:
+
         def __init__(self, target: Path):
             self.target = target
 
@@ -56,16 +55,15 @@ def test_factory_compiles_saves_loads_and_scans_executable_offsets(
                 return [(111, b"prefix" + b"X" * len(MARKER) + b"suffix")]
             raise AssertionError("Unexpected specimen")
 
-    monkeypatch.setitem(sys.modules, "factory.elf", SimpleNamespace(ELF=SyntheticElf))
+    monkeypatch.setitem(sys.modules, "factory.elf",
+                        SimpleNamespace(ELF=SyntheticElf))
     positive = reloaded.scan(Path("affected.elf"))
     assert positive["detected"] is True
-    assert positive["matches"] == [
-        {
-            "rule": "CVE_2099_56789_ELF64_x86_64",
-            "pattern": "$v0",
-            "file_offset": 117,
-        }
-    ]
+    assert positive["matches"] == [{
+        "rule": "CVE_2099_56789_ELF64_x86_64",
+        "pattern": "$v0",
+        "file_offset": 117,
+    }]
     negative = reloaded.scan(Path("fixed.elf"))
     assert negative["detected"] is False
     assert negative["matches"] == []

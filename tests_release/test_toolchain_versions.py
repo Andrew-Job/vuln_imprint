@@ -6,7 +6,6 @@ from factory.toolchains import probe_compiler, ToolchainMismatch
 from scripts.create_catalog import make_manifest, parse_compiler_lanes
 from tools.production_db import ReleaseRejected, validate_reviewed_toolchain
 
-
 RECORD = (
     'CVE-2099-10001',
     'zlib',
@@ -28,19 +27,15 @@ def test_generated_manifest_has_full_factorial_build_lanes():
     recipe = make_manifest(RECORD)
     assert len(recipe['builds']) == 16
     assert len(recipe['samples']) == 48
-    lanes = {
-        (
-            build['profile']['compiler'],
-            build['profile']['compiler_major'],
-            build['profile']['optimization'],
-        )
-        for build in recipe['builds']
-    }
+    lanes = {(
+        build['profile']['compiler'],
+        build['profile']['compiler_major'],
+        build['profile']['optimization'],
+    ) for build in recipe['builds']}
     assert len(lanes) == 8
     assert {family for family, _, _ in lanes} == {'gcc', 'clang'}
-    assert {build['state'] for build in recipe['builds']} == {
-        'affected', 'fixed'
-    }
+    assert {build['state'] for build in recipe['builds']
+           } == {'affected', 'fixed'}
 
 
 def test_release_evidence_needs_real_versions(monkeypatch):
@@ -67,7 +62,10 @@ def test_release_evidence_needs_real_versions(monkeypatch):
         'sha256': 'c' * 64,
         'build_provenance': {
             'schema_version': 1,
-            'source': {'type': 'git', 'commit': 'a' * 40},
+            'source': {
+                'type': 'git',
+                'commit': 'a' * 40
+            },
             'source_provenance_sha256': 'f' * 64,
             'toolchain': {
                 'family': 'gcc',
@@ -96,32 +94,45 @@ def test_release_evidence_needs_real_versions(monkeypatch):
 
     wrong_source = {
         **row['build_provenance'],
-        'source': {'type': 'git', 'commit': 'e' * 40},
+        'source': {
+            'type': 'git',
+            'commit': 'e' * 40
+        },
     }
     with pytest.raises(ReleaseRejected, match='bind the sample'):
-        validate_reviewed_toolchain(
-            {**row, 'build_provenance': wrong_source}, cve
-        )
+        validate_reviewed_toolchain({
+            **row, 'build_provenance': wrong_source
+        }, cve)
 
     wrong_opt = {
         **row['build_provenance'],
         'commands': [['gcc-12', '-O3', '-o', 'host_0']],
     }
     with pytest.raises(ReleaseRejected, match='optimization'):
-        validate_reviewed_toolchain(
-            {**row, 'build_provenance': wrong_opt}, cve
-        )
+        validate_reviewed_toolchain({**row, 'build_provenance': wrong_opt}, cve)
 
     for change in (
-        {'compiler_version': '12'},
-        {'compiler_major': 13},
-        {'compiler_binary_sha256': 'nope'},
-        {'compiler_family': 'unknown'},
+        {
+            'compiler_version': '12'
+        },
+        {
+            'compiler_major': 13
+        },
+        {
+            'compiler_binary_sha256': 'nope'
+        },
+        {
+            'compiler_family': 'unknown'
+        },
     ):
         with pytest.raises(ReleaseRejected):
             validate_reviewed_toolchain(
-                {**row, 'build_profile': {**good, **change}}, cve
-            )
+                {
+                    **row, 'build_profile': {
+                        **good,
+                        **change
+                    }
+                }, cve)
 
     # An object-file digest cannot identify the linked executable.
     module_only = {
@@ -133,9 +144,9 @@ def test_release_evidence_needs_real_versions(monkeypatch):
         },
     }
     with pytest.raises(ReleaseRejected, match='bind the sample'):
-        validate_reviewed_toolchain(
-            {**row, 'build_provenance': module_only}, cve
-        )
+        validate_reviewed_toolchain({
+            **row, 'build_provenance': module_only
+        }, cve)
     with pytest.raises(ReleaseRejected, match='linked host_0/host_1'):
         validate_reviewed_toolchain({**row, 'artifact_role': 'module.o'}, cve)
     with pytest.raises(ReleaseRejected, match='link command'):
@@ -150,8 +161,7 @@ def test_release_evidence_needs_real_versions(monkeypatch):
             cve,
         )
     assert validate_reviewed_toolchain(
-        {'binary_kind': 'stripped_third_party_executable'}, cve
-    ) is None
+        {'binary_kind': 'stripped_third_party_executable'}, cve) is None
 
 
 def test_configurable_compiler_lanes():
@@ -159,10 +169,8 @@ def test_configurable_compiler_lanes():
         RECORD,
         compiler_lanes=['gcc-15', 'gcc-16', 'clang-22', 'clang-23'],
     )
-    lanes = {
-        (build['profile']['compiler'], build['profile']['compiler_major'])
-        for build in recipe['builds']
-    }
+    lanes = {(build['profile']['compiler'], build['profile']['compiler_major'])
+             for build in recipe['builds']}
     assert lanes == {
         ('gcc', 15),
         ('gcc', 16),

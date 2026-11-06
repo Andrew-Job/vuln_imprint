@@ -1,5 +1,6 @@
 PYTHON ?= python3
 CLANG_FORMAT ?= clang-format
+YAPF ?= yapf
 .PHONY: test test-native
 
 test:
@@ -14,12 +15,12 @@ test-native:
 # Never format Git submodules under external/.
 format:
 	$(CLANG_FORMAT) -i scanner/src/*.cc scanner/fuzz/*.cc scanner/include/vulnimprint/*.h
-	python -m yapf -ir cli.py factory scripts tools tests tests_release tests_integration
+	$(YAPF) --style=.style.yapf -ir cli.py factory scripts tools tests tests_release tests_integration
 
 format-check:
 	$(CLANG_FORMAT) --dry-run --Werror scanner/src/*.cc scanner/fuzz/*.cc scanner/include/vulnimprint/*.h
 	@tmp=$$(mktemp); trap 'rm -f "$$tmp"' EXIT; \
-	 python -m yapf --style=.style.yapf -dr cli.py factory scripts tools tests tests_release tests_integration > "$$tmp"; \
+	 $(YAPF) --style=.style.yapf -dr cli.py factory scripts tools tests tests_release tests_integration > "$$tmp"; \
 	 if test -s "$$tmp"; then cat "$$tmp"; exit 1; fi
 
 test-coverage:

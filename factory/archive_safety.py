@@ -22,10 +22,11 @@ def extract_zip(archive: Path, output: Path) -> None:
             path = PurePosixPath(name)
             mode = (info.external_attr >> 16) & 0o170000
             normalized = path.as_posix().rstrip('/')
-            if (not normalized or name.startswith('/') or
-                '\\' in name or ':' in name or
-                any(part in ('.', '..', '') for part in name.rstrip('/').split('/')) or
-                normalized in seen or mode not in (0, 0o040000, 0o100000) or
+            if (not normalized or name.startswith('/') or '\\' in name or
+                    ':' in name or
+                    any(part in ('.', '..', '')
+                        for part in name.rstrip('/').split('/')) or
+                    normalized in seen or mode not in (0, 0o040000, 0o100000) or
                 (name.endswith('/') != info.is_dir())):
                 raise ValueError('unsafe, duplicate or ambiguous ZIP member')
             seen.add(normalized)
@@ -35,4 +36,5 @@ def extract_zip(archive: Path, output: Path) -> None:
         for info in infos:
             extracted = Path(zf.extract(info, output))
             if not info.is_dir() and extracted.stat().st_size != info.file_size:
-                raise ValueError('ZIP extracted size differs from declared size')
+                raise ValueError(
+                    'ZIP extracted size differs from declared size')

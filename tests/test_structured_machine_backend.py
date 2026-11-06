@@ -50,14 +50,19 @@ __attribute__((noinline)) int feature(int n){ return helper(n + 17); }
 __attribute__((noinline)) int other(int n){ return n * 5; }
 ''')
     obj = tmp_path / 'component.o'
-    subprocess.run(['gcc', '-O2', '-fno-pie', '-c', str(source), '-o', str(obj)],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ['gcc', '-O2', '-fno-pie', '-c',
+         str(source), '-o',
+         str(obj)],
+        check=True,
+        capture_output=True)
     elf = ELF(obj)
     assert elf.kind == 1 and elf.machine == 62
     assert elf.executable_ranges()
     assert any(name == '.text' for name, _, _ in elf.symbol_ranges(['feature']))
     relocs = elf.relocations()
-    assert relocs.get('.text'), 'actual GCC external call relocation must be present'
+    assert relocs.get(
+        '.text'), 'actual GCC external call relocation must be present'
     only_feature = disassemble(obj, symbols=['feature'])
     assert only_feature and all(ins.section == '.text' for ins in only_feature)
     assert any(0 in ins.normalized.mask for ins in only_feature)

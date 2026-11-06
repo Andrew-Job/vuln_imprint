@@ -15,12 +15,16 @@ from tools.production_db import ReleaseRejected, verify_static_product
 
 
 def _compile(tmp_path: Path, *argv: str) -> Path:
-    subprocess.run(['gcc', *argv], cwd=tmp_path, capture_output=True,
-                   check=True, timeout=30)
+    subprocess.run(['gcc', *argv],
+                   cwd=tmp_path,
+                   capture_output=True,
+                   check=True,
+                   timeout=30)
     return tmp_path / argv[-1]
 
 
-def test_only_real_static_stripped_executables_receive_structural_credit(tmp_path):
+def test_only_real_static_stripped_executables_receive_structural_credit(
+        tmp_path):
     (tmp_path / 'entry.S').write_text(
         '.global _start\n_start:\nmov $60, %eax\nxor %edi, %edi\nsyscall\n')
     obj = _compile(tmp_path, '-c', 'entry.S', '-o', 'module.o')
@@ -52,5 +56,6 @@ def test_exec_section_must_match_segment_file_offset(tmp_path):
                      struct.unpack_from('<Q', raw, position)[0] + 1)
     mutated = tmp_path / 'mutated'
     mutated.write_bytes(raw)
-    with pytest.raises(UnsupportedBinary, match='does not map to PT_LOAD bytes'):
+    with pytest.raises(UnsupportedBinary,
+                       match='does not map to PT_LOAD bytes'):
         ELF(mutated)

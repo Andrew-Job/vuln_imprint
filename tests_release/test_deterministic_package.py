@@ -25,12 +25,17 @@ def test_reproducible_archive_content_and_metadata(tmp_path: Path, monkeypatch):
     os.utime(binary, (1, 1))
     os.utime(root / "bin", (2, 2))
     write_reproducible_archive(root, b)
-    assert hashlib.sha256(a.read_bytes()).digest() == hashlib.sha256(b.read_bytes()).digest()
+    assert hashlib.sha256(a.read_bytes()).digest() == hashlib.sha256(
+        b.read_bytes()).digest()
     with tarfile.open(a, "r:gz") as archive:
         names = archive.getnames()
-        assert names == ["vulnimprint", "vulnimprint/bin", "vulnimprint/bin/vulnimprint-scan"]
-        assert all(m.uid == 0 and m.gid == 0 and m.mtime == 1735689600 for m in archive)
-        assert archive.getmember("vulnimprint/bin/vulnimprint-scan").mode == 0o755
+        assert names == [
+            "vulnimprint", "vulnimprint/bin", "vulnimprint/bin/vulnimprint-scan"
+        ]
+        assert all(m.uid == 0 and m.gid == 0 and m.mtime == 1735689600
+                   for m in archive)
+        assert archive.getmember(
+            "vulnimprint/bin/vulnimprint-scan").mode == 0o755
 
 
 def test_invalid_source_date_epoch_rejected(tmp_path: Path, monkeypatch):

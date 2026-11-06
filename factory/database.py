@@ -13,7 +13,10 @@ def _platform_key(platform: dict) -> str:
         raise ValueError("invalid platform metadata")
     # Every build/profile field is significant, including compiler version,
     # optimization and ABI. The same CVE can be present in many profiles.
-    return json.dumps(platform, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return json.dumps(platform,
+                      sort_keys=True,
+                      separators=(",", ":"),
+                      allow_nan=False)
 
 
 def merge_packs(pack_dirs: list[Path], output: Path, allow_experimental=False):
@@ -34,10 +37,15 @@ def merge_packs(pack_dirs: list[Path], output: Path, allow_experimental=False):
             raise ValueError(f"duplicate CVE/platform in database: {key}")
         seen.add(key)
         status = pack["status"]
-        entry = {"cve": cve, "status": status, "platform": platform,
-                 "included": False}
-        if (pack.get("rules") and status not in ("NO_SIGNATURE", "QUALITY_REJECTED")
-                and (status == "CVE_SPECIFIC_VALIDATED" or allow_experimental)):
+        entry = {
+            "cve": cve,
+            "status": status,
+            "platform": platform,
+            "included": False
+        }
+        if (pack.get("rules") and
+                status not in ("NO_SIGNATURE", "QUALITY_REJECTED") and
+            (status == "CVE_SPECIFIC_VALIDATED" or allow_experimental)):
             rule_source = directory / "rules-exec.yar"
             source = rule_source.read_text()
             contents.append(source)
@@ -48,17 +56,23 @@ def merge_packs(pack_dirs: list[Path], output: Path, allow_experimental=False):
             dest.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(pack_file, dest / "pack.json")
             shutil.copyfile(rule_source, dest / "rules-exec.yar")
-            entry.update({"included": True, "pattern_count": len(pack["rules"]),
-                          "pack_dir": (Path("packs") / dest.name).as_posix()})
+            entry.update({
+                "included": True,
+                "pattern_count": len(pack["rules"]),
+                "pack_dir": (Path("packs") / dest.name).as_posix()
+            })
         index.append(entry)
     (output / "database.yar").write_text("\n".join(contents))
     included = {item["cve"] for item in index if item["included"]}
-    report = {"schema_version": 1,
-              "cve_count": len({item["cve"] for item in index}),
-              "platform_pack_count": len(seen),
-              "included_cve_count": len(included),
-              "included_platform_pack_count": sum(item["included"] for item in index),
-              "allow_experimental": allow_experimental, "entries": index}
+    report = {
+        "schema_version": 1,
+        "cve_count": len({item["cve"] for item in index}),
+        "platform_pack_count": len(seen),
+        "included_cve_count": len(included),
+        "included_platform_pack_count": sum(item["included"] for item in index),
+        "allow_experimental": allow_experimental,
+        "entries": index
+    }
     (output / "index.json").write_text(json.dumps(report, indent=2) + "\n")
     return report
 
@@ -73,7 +87,8 @@ def load_included_packs(directory: Path):
             continue
         folder = entry.get("pack_dir")
         if not isinstance(folder, str) or not folder:
-            raise ValueError("index entry lacks pack_dir; rerun database command")
+            raise ValueError(
+                "index entry lacks pack_dir; rerun database command")
         relative = Path(folder)
         if relative.is_absolute() or ".." in relative.parts:
             raise ValueError("unsafe pack_dir in database index")
@@ -84,9 +99,10 @@ def load_included_packs(directory: Path):
         cve = entry.get("cve")
         profile = _platform_key(pack.get("platform", {}))
         key = (cve, profile)
-        if (pack.get("cve") != cve or key in seen
-                or _platform_key(entry.get("platform", pack.get("platform", {}))) != profile):
-            raise ValueError("database index CVE/platform is inconsistent or duplicated")
+        if (pack.get("cve") != cve or key in seen or _platform_key(
+                entry.get("platform", pack.get("platform", {}))) != profile):
+            raise ValueError(
+                "database index CVE/platform is inconsistent or duplicated")
         seen.add(key)
         result.append(pack)
     return result

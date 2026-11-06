@@ -8,13 +8,13 @@ from pathlib import Path
 import shutil
 import subprocess
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_native_elfio_adapter_supported_types_and_invalid_inputs(tmp_path):
     elfio = ROOT / 'external/elfio/elfio/elfio.hpp'
-    assert elfio.is_file(), 'Pinned ELFIO Git submodule is required for native CI'
+    assert elfio.is_file(
+    ), 'Pinned ELFIO Git submodule is required for native CI'
     compiler = shutil.which('g++') or shutil.which('clang++')
     cc = shutil.which('cc')
     assert compiler and cc, 'Native C/C++ compilers are mandatory in CI'
@@ -25,9 +25,13 @@ def test_native_elfio_adapter_supported_types_and_invalid_inputs(tmp_path):
     rel = tmp_path / 'sample.o'
     exe = tmp_path / 'sample_exec'
     dso = tmp_path / 'sample.so'
-    for args in ([cc, '-c', str(source), '-o', str(rel)],
-                 [cc, '-no-pie', str(source), '-o', str(exe)],
-                 [cc, '-shared', '-fPIC', str(source), '-o', str(dso)]):
+    for args in ([cc, '-c', str(source), '-o',
+                  str(rel)], [cc, '-no-pie',
+                              str(source), '-o',
+                              str(exe)],
+                 [cc, '-shared', '-fPIC',
+                  str(source), '-o',
+                  str(dso)]):
         subprocess.run(args, check=True, timeout=45)
 
     harness = tmp_path / 'contract.cc'
@@ -157,10 +161,19 @@ int main(int argc, char** argv) {
 ''')
     binary = tmp_path / 'contract'
     subprocess.run(
-        [compiler, '-std=c++20', '-Wall', '-Wextra', '-Wpedantic', '-Werror',
-         '-I', str(ROOT / 'scanner/include'), '-I', str(ROOT / 'external/elfio'),
-         str(ROOT / 'scanner/src/elf.cc'), str(harness), '-o', str(binary)],
-        check=True, timeout=90,
+        [
+            compiler, '-std=c++20', '-Wall', '-Wextra', '-Wpedantic', '-Werror',
+            '-I',
+            str(ROOT / 'scanner/include'), '-I',
+            str(ROOT / 'external/elfio'),
+            str(ROOT / 'scanner/src/elf.cc'),
+            str(harness), '-o',
+            str(binary)
+        ],
+        check=True,
+        timeout=90,
     )
-    subprocess.run([str(binary), str(rel), str(exe), str(dso)],
-                   check=True, timeout=30)
+    subprocess.run([str(binary), str(rel),
+                    str(exe), str(dso)],
+                   check=True,
+                   timeout=30)

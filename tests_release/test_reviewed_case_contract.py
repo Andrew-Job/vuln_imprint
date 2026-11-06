@@ -12,7 +12,6 @@ import pytest
 from factory.yara_engine import source_from_packs
 from tools import production_db
 
-
 CVE = "CVE-2025-12345"
 HEX_PATTERN = " ".join(f"{i:02X}" for i in range(32))
 
@@ -22,16 +21,27 @@ def make_reviewed_case(tmp_path, monkeypatch):
     specimens = case / "specimens"
     specimens.mkdir(parents=True)
     pack = {
-        "schema_version": 1,
-        "cve": CVE,
-        "status": "CVE_SPECIFIC_VALIDATED",
-        "source_type": "factory",
+        "schema_version":
+            1,
+        "cve":
+            CVE,
+        "status":
+            "CVE_SPECIFIC_VALIDATED",
+        "source_type":
+            "factory",
         "platform": {
-            "os": "linux", "format": "ELF", "arch": "x86-64",
-            "bits": 64, "abi": "sysv",
+            "os": "linux",
+            "format": "ELF",
+            "arch": "x86-64",
+            "bits": 64,
+            "abi": "sysv",
         },
-        "rules": [{"id": f"{CVE}-0", "hex": HEX_PATTERN,
-                   "length": 32, "fixed_bytes": 32}],
+        "rules": [{
+            "id": f"{CVE}-0",
+            "hex": HEX_PATTERN,
+            "length": 32,
+            "fixed_bytes": 32
+        }],
     }
     pack_path = case / "pack.json"
     rules_path = case / "rules-exec.yar"
@@ -52,8 +62,8 @@ def make_reviewed_case(tmp_path, monkeypatch):
             "sha256": production_db.sha256(path),
             "origin": "https://example.org/source/commit/123",
             "split": "independent_holdout",
-            "label_basis": ("independent_unrelated" if label == "unrelated"
-                            else "patch_state"),
+            "label_basis": ("independent_unrelated"
+                            if label == "unrelated" else "patch_state"),
             "source_commit": "a" * 40,
             "version": version or ("1.2.0" if label != "fixed" else "1.2.1"),
         }
@@ -70,20 +80,31 @@ def make_reviewed_case(tmp_path, monkeypatch):
                 "optimization": opt,
             }
             sample["build_provenance"] = {
-                "schema_version": 1,
-                "source": {"type": "git", "commit": sample["source_commit"]},
-                "source_provenance_sha256": "f" * 64,
+                "schema_version":
+                    1,
+                "source": {
+                    "type": "git",
+                    "commit": sample["source_commit"]
+                },
+                "source_provenance_sha256":
+                    "f" * 64,
                 "toolchain": {
-                    "family": family, "version": f"{major}.0.1",
+                    "family": family,
+                    "version": f"{major}.0.1",
                     "binary_sha256": "b" * 64,
-                    "target": "x86_64-linux-gnu", "optimization": opt,
+                    "target": "x86_64-linux-gnu",
+                    "optimization": opt,
                     "executable": f"/usr/bin/{family}-{major}",
                 },
-                "artifacts": {"module.o": "a" * 64,
-                              "libcomponent.a": "d" * 64,
-                              "host_0": sample["sha256"], "host_1": "e" * 64},
-                "commands": [[f"/usr/bin/{family}-{major}", opt,
-                              "main.c", "-o", "host_0"]],
+                "artifacts": {
+                    "module.o": "a" * 64,
+                    "libcomponent.a": "d" * 64,
+                    "host_0": sample["sha256"],
+                    "host_1": "e" * 64
+                },
+                "commands": [[
+                    f"/usr/bin/{family}-{major}", opt, "main.c", "-o", "host_0"
+                ]],
             }
         if label == "backport":
             sample["patch_commit"] = "c" * 40
@@ -97,9 +118,9 @@ def make_reviewed_case(tmp_path, monkeypatch):
         for major in majors:
             for opt in ("-O2", "-O3"):
                 lane = (family, major, opt)
-                add(
-                    "affected", f"affected-{family}-{major}-{opt}", compiler=lane
-                )
+                add("affected",
+                    f"affected-{family}-{major}-{opt}",
+                    compiler=lane)
                 add("fixed", f"fixed-{family}-{major}-{opt}", compiler=lane)
     add("backport", "backport-same-version", compiler=("gcc", 11, "-O2"))
     add("affected", "independent-static-product", static=True)
@@ -120,17 +141,21 @@ def make_reviewed_case(tmp_path, monkeypatch):
 
     def fake_native_scan(scanner, rules, target, **kwargs):
         # Simulate the scanner's output schema, not YARA-X matching semantics.
-        positive = (
-            target.stem.startswith("affected-")
-            or target.stem == "independent-static-product"
-        )
+        positive = (target.stem.startswith("affected-") or
+                    target.stem == "independent-static-product")
         return {
-            "matches": ([{"cve": CVE, "executable": True}] if positive else [])
+            "matches": ([{
+                "cve": CVE,
+                "executable": True
+            }] if positive else [])
         }
 
     monkeypatch.setattr(production_db, "native_scan", fake_native_scan)
-    monkeypatch.setattr(production_db, "probe_compiler", lambda *a, **k: {
-        "binary_sha256": "b" * 64, "target": "x86_64-linux-gnu"})
+    monkeypatch.setattr(
+        production_db, "probe_compiler", lambda *a, **k: {
+            "binary_sha256": "b" * 64,
+            "target": "x86_64-linux-gnu"
+        })
     # Policy unit tests isolate attestation/ELF parsing; independent tests
     # exercise actual bytes and real external tools in integration CI.
     monkeypatch.setattr(production_db, "verify_static_product", lambda *_: None)
@@ -142,19 +167,20 @@ def make_reviewed_case(tmp_path, monkeypatch):
 
 
 def test_reviewed_case_accepts_complete_independent_matrix(
-    tmp_path, monkeypatch
-):
+        tmp_path, monkeypatch):
     case, spec, scanner = make_reviewed_case(tmp_path, monkeypatch)
     result = production_db.validate_case(case, scanner)
     assert result["quality"] == "CVE_SPECIFIC_VALIDATED"
     assert result["counts"] == {
-        "affected": 9, "fixed": 8, "backport": 1, "unrelated": 20,
+        "affected": 9,
+        "fixed": 8,
+        "backport": 1,
+        "unrelated": 20,
     }
     assert len(result["tested_build_profiles"]["affected"]) == 8
     assert len(result["tested_build_profiles"]["fixed"]) == 8
-    assert (
-        sum(item["independent_static_product"] for item in result["samples"]) == 1
-    )
+    assert (sum(
+        item["independent_static_product"] for item in result["samples"]) == 1)
 
 
 @pytest.mark.parametrize("problem,expected", [
@@ -166,9 +192,8 @@ def test_reviewed_case_accepts_complete_independent_matrix(
     ("specimen_escapes_case", "outside case dir"),
     ("forged_hash", "specimen SHA-256 mismatch"),
 ])
-def test_reviewed_case_rejects_insufficient_evidence(
-    tmp_path, monkeypatch, problem, expected
-):
+def test_reviewed_case_rejects_insufficient_evidence(tmp_path, monkeypatch,
+                                                     problem, expected):
     case, spec, scanner = make_reviewed_case(tmp_path, monkeypatch)
     sample = spec["samples"]
     if problem == "missing_fixed_lane":
@@ -201,31 +226,30 @@ def test_fixed_binary_match_fails_evidence_gate(tmp_path, monkeypatch):
         return original_scan(scanner, rules, target, **kwargs)
 
     monkeypatch.setattr(production_db, "native_scan", incorrect_scan)
-    with pytest.raises(
-        production_db.ReleaseRejected, match="fixed sample misclassified"
-    ):
+    with pytest.raises(production_db.ReleaseRejected,
+                       match="fixed sample misclassified"):
         production_db.validate_case(case, scanner)
 
 
 def test_fixed_lineage_independence_cannot_be_satisfied_by_backport(
-    tmp_path, monkeypatch
-):
+        tmp_path, monkeypatch):
     """A separate backport does not provide a second independent fixed lineage."""
     case, spec, scanner = make_reviewed_case(tmp_path, monkeypatch)
     for row in spec["samples"]:
         if row["label"] == "fixed":
             row["lineage"] = "shared-fixed-build-lineage"
     (case / "reviewed-evidence.json").write_text(json.dumps(spec))
-    with pytest.raises(
-        production_db.ReleaseRejected, match="insufficient affected/fixed lineages"
-    ):
+    with pytest.raises(production_db.ReleaseRejected,
+                       match="insufficient affected/fixed lineages"):
         production_db.validate_case(case, scanner)
 
 
-def test_admission_rejects_noncanonical_platform_metadata(tmp_path, monkeypatch):
+def test_admission_rejects_noncanonical_platform_metadata(
+        tmp_path, monkeypatch):
     case, spec, scanner = make_reviewed_case(tmp_path, monkeypatch)
     pack = json.loads((case / "pack.json").read_text())
     pack["platform"]["compiler"] = "gcc"
     (case / "pack.json").write_text(json.dumps(pack))
-    with pytest.raises(production_db.ReleaseRejected, match="noncanonical platform"):
+    with pytest.raises(production_db.ReleaseRejected,
+                       match="noncanonical platform"):
         production_db.validate_case(case, scanner)

@@ -13,8 +13,14 @@ def _pack(cve: str, *, hex_pattern: str = "48 83 EC 28") -> dict:
     return {
         "cve": cve,
         "status": "CANDIDATE_ONLY",
-        "platform": {"format": "ELF", "arch": "x86-64", "bits": 64},
-        "rules": [{"hex": hex_pattern}],
+        "platform": {
+            "format": "ELF",
+            "arch": "x86-64",
+            "bits": 64
+        },
+        "rules": [{
+            "hex": hex_pattern
+        }],
     }
 
 
@@ -29,7 +35,8 @@ def test_rule_aggregation_is_deterministic_and_preserves_cve_identity():
 
 
 @pytest.mark.parametrize("mutation", [
-    lambda p: p.update(cve='CVE-2025-12345" } rule injected { condition: true }'),
+    lambda p: p.update(cve='CVE-2025-12345" } rule injected { condition: true }'
+                      ),
     lambda p: p.update(status='CANDIDATE_ONLY"\n condition: true'),
     lambda p: p["rules"][0].update(hex='48 8B } condition: true'),
 ])
