@@ -84,19 +84,64 @@ jobs:
           sudo apt-get install -y gcc-11 gcc-12 clang-14 clang-15
           python -m tools.check_toolchain_matrix --out /tmp/vulnimprint-toolchains.json
           python -m pytest -q tests_release/test_toolchain_versions.py
+      # Execute all YARA-X-independent native checks before the expensive
+      # Rust/C++ builds; failures here should not cost a full upstream rebuild.
+      - name: Preflight ELFIO boundary, fuzzing, JSON and static ELF admission
+        run: |
+          python -m pytest -q \
+            tests_integration/test_elfio_adapter_native.py \
+            tests_integration/test_elfio_adapter_fuzz.py \
+            tests_integration/test_native_json_serialization.py \
+            tests_integration/test_static_product_elf_admission.py
+      # The checkout's exact Git commit participates in the cache key. A cache
+      # never substitutes for checking out and validating the upstream sources.
+      - name: Identify the pinned upstream build inputs
+        id: upstream_sha
+        run: echo "value=$(git -C external/yara-x rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      # Official first-party GitHub cache. Restore prior compiled Rust outputs,
+      # but always run cargo cinstall, CMake and all integration tests.
+      - name: Restore pinned Rust tool and YARA-X build cache
+        id: rust_cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/bin/cargo-capi
+            ~/.cargo/bin/cargo-cbuild
+            ~/.cargo/bin/cargo-cinstall
+            ~/.cargo/bin/cargo-ctest
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            external/yara-x/target
+          key: ${{ runner.os }}-${{ runner.arch }}-ubuntu-22.04-rust-1.99.1-cargo-c-0.10.26-yarax-${{ steps.upstream_sha.outputs.value }}-${{ hashFiles('external/yara-x/Cargo.lock') }}-v1
       - name: Build official YARA-X from the pinned recursive Git checkout and run C API smoke
         run: |
           bash scripts/bootstrap_yarax.sh
           echo "PKG_CONFIG_PATH=$HOME/.local/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$HOME/.local/lib" >> "$GITHUB_ENV"
+      # Save immediately after successful upstream/C++ smoke. A later test
+      # failure must not discard the already-built Rust dependencies.
+      # Only trusted main pushes can populate caches shared with PRs.
+      - name: Save pinned Rust build cache for subsequent CI runs
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.rust_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/bin/cargo-capi
+            ~/.cargo/bin/cargo-cbuild
+            ~/.cargo/bin/cargo-cinstall
+            ~/.cargo/bin/cargo-ctest
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            external/yara-x/target
+          key: ${{ steps.rust_cache.outputs.cache-primary-key }}
       - name: Build Python YARA-X bindings from the same pinned upstream source
         run: |
           bash scripts/build_yarax_python.sh
           python -m pytest -q tests_integration/test_native_yara_x_factory.py
-      - name: Test VulnImprint ELFIO adapter contract on real ELF files
-        run: python -m pytest -q tests_integration/test_elfio_adapter_native.py
-      - name: Fuzz the first-party ELFIO adapter with ASan/UBSan
-        run: python -m pytest -q tests_integration/test_elfio_adapter_fuzz.py
       - name: Execute complete native-dependent regression suite
         run: python -m pytest -q tests tests_release tests_integration
       - name: Repeat native integration against real upstream C API (no test stubs)
