@@ -4,7 +4,6 @@
 #include <openssl/evp.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <yara_x.h>
 
 #include <algorithm>
 #include <atomic>
@@ -34,6 +33,7 @@
 #include "vulnimprint/elf.h"
 #include "vulnimprint/json.h"
 #include "vulnimprint/match_location.h"
+#include "vulnimprint/yara_x_api.h"
 
 namespace fs = std::filesystem;
 namespace {
