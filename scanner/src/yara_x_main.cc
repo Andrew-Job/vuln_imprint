@@ -283,7 +283,8 @@ void match_cb(const YRX_MATCH* match, void* user_data) noexcept {
         Hit hit{state->issue,    state->cves,
                 state->rule,     state->pattern,
                 state->evidence, state->base_offset + match->offset,
-                match->length};
+                match->length,   false,
+                std::nullopt};
         const auto location = vulnimprint::LocateMatch(
                 *state->executable_regions, hit.offset, hit.length);
         hit.executable = location.executable;
