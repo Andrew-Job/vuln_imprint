@@ -1,0 +1,25 @@
+name: Bug report
+description: Report an issue in VulnImprint (not a private security issue).
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: For security vulnerabilities, use private reporting under Security instead.
+  - type: input
+    id: version
+    attributes:
+      label: VulnImprint release or commit
+      placeholder: v0.1.0 or full commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Observed behavior and expected result
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction (do not upload unlicensed binaries)

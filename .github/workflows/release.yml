@@ -1,0 +1,177 @@
+name: VulnImprint verified release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: vulnimprint-release
+  cancel-in-progress: false
+jobs:
+  # Unprivileged build job: build exactly the checked-out tagged commit.
+  # It has no permission to publish releases or mint OIDC credentials.
+  build-and-validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.source.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Install pinned Factory parsing dependencies for release verification
+        run: python -m pip install -r requirements-factory.txt
+      - name: Select release source
+        id: source
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          printf 'version=%s\n' "$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # Rust toolchain action (toolchain 1.99.1)
+        with:
+          toolchain: '1.99.1'
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: external/yara-x -> target
+          shared-key: yarax-1.23.0-rust-1.99.1
+          key: cargo-c-0.10.26
+          save-if: false
+      - name: Install pinned cargo-c
+        run: cargo +1.99.1 install cargo-c --version 0.10.26 --locked
+      - name: Build pinned official YARA-X and native scanner
+        run: |
+          bash scripts/bootstrap_yarax.sh
+      - name: Compile all production-channel CVE records
+        run: |
+          python -m tools.production_db assemble --signatures signatures \
+            --channel production --output release-output/db \
+            --scanner build/scanner/vulnimprint-scan
+      - name: Produce packaged native release and release metadata
+        env:
+          VERSION: ${{ steps.source.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cmake --install build --prefix "$PWD/native-install"
+          mkdir -p dist
+          SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")" \
+            python -m tools.package_product --database release-output/db \
+            --scanner native-install/bin/vulnimprint-scan \
+            --version "$VERSION" --output dist/vulnimprint-linux-x86_64.tar.gz
+          bash scripts/install_syft.sh
+          python -m tools.create_sbom \
+            --product dist/vulnimprint-linux-x86_64.tar.gz \
+            --syft "$HOME/.local/bin/syft" --output dist/SBOM.spdx.json
+          python -m tools.release_approval create --database release-output/db \
+            --tag "$VERSION" --source-commit "$GITHUB_SHA" \
+            --asset dist/vulnimprint-linux-x86_64.tar.gz \
+            --asset dist/SBOM.spdx.json \
+            --output dist/release-contents.json
+          python -m tools.release_approval verify \
+            --contents dist/release-contents.json --assets-dir dist
+          (cd dist && sha256sum *.tar.gz *.json > SHA256SUMS)
+      - name: Clean installed product smoke (no build environment)
+        env:
+          VERSION: ${{ steps.source.outputs.version }}
+        run: |
+          mkdir -p /tmp/vulnimprint-clean
+          tar -xf dist/vulnimprint-linux-x86_64.tar.gz -C /tmp/vulnimprint-clean
+          env -u PYTHONPATH \
+            /tmp/vulnimprint-clean/vulnimprint/bin/vulnimprint version | grep -Fx "$VERSION"
+          env -u PYTHONPATH \
+            /tmp/vulnimprint-clean/vulnimprint/bin/vulnimprint scan --json \
+            /tmp/vulnimprint-clean/vulnimprint/bin/vulnimprint-scan \
+            >/tmp/vulnimprint-product-smoke.json
+          python - <<'PY'
+          import json
+          with open('/tmp/vulnimprint-product-smoke.json', encoding='utf-8') as stream:
+              result = json.load(stream)
+          assert result['engine'] == 'yara-x'
+          assert len(result['results']) == 1 and result['results'][0]['error'] is None
+          PY
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vulnimprint-release-candidate
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  # Only publication has write and OIDC permissions. Source builds happen
+  # in the preceding unprivileged job.
+  publish:
+    needs: build-and-validate
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      actions: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - name: Download build job's artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vulnimprint-release-candidate
+          path: dist
+      - name: Verify downloaded immutable candidate
+        run: |
+          (cd dist && sha256sum -c SHA256SUMS)
+          python3 -m tools.release_approval verify \
+            --contents dist/release-contents.json --assets-dir dist
+      - name: Attest SLSA provenance of all finalized release assets
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/*
+      - name: Attest SPDX SBOM for the product archive only
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/vulnimprint-linux-x86_64.tar.gz
+          sbom-path: dist/SBOM.spdx.json
+      - name: Create immutable-bound draft (do not auto-create or move tags)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build-and-validate.outputs.version }}
+        run: |
+          ! gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1
+          gh release create "$VERSION" --verify-tag --draft --repo "$GITHUB_REPOSITORY" \
+            --title "VulnImprint $VERSION" \
+            --notes "Native YARA-X scanner and Git-tracked machine signatures for Linux ELF64 x86-64. The bundled index records CVE-owned production DB records and source digests; channel assignment and a match alone are not proof of exploitability. SBOM and SHA256SUMS attached." \
+            dist/*.tar.gz dist/release-contents.json dist/SBOM.spdx.json dist/SHA256SUMS
+      - name: Verify uploaded bytes before making public
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build-and-validate.outputs.version }}
+        run: |
+          mkdir -p downloaded
+          gh release download "$VERSION" --repo "$GITHUB_REPOSITORY" --dir downloaded
+          for asset in vulnimprint-linux-x86_64.tar.gz \
+                       release-contents.json SBOM.spdx.json SHA256SUMS; do
+            cmp -- "dist/$asset" "downloaded/$asset"
+            gh attestation verify "downloaded/$asset" --repo "$GITHUB_REPOSITORY" \
+              --source-ref "$GITHUB_REF" --source-digest "$GITHUB_SHA" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+          done
+          gh attestation verify downloaded/vulnimprint-linux-x86_64.tar.gz \
+            --repo "$GITHUB_REPOSITORY" \
+            --source-ref "$GITHUB_REF" --source-digest "$GITHUB_SHA" \
+            --predicate-type https://spdx.dev/Document/v2.3 \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+          (cd downloaded && sha256sum -c ../dist/SHA256SUMS)
+          python3 -m tools.release_approval verify \
+            --contents downloaded/release-contents.json --assets-dir downloaded
+          gh release edit "$VERSION" --repo "$GITHUB_REPOSITORY" --verify-tag --draft=false

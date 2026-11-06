@@ -1,0 +1,34 @@
+# Build outputs / local state
+build/
+.cmake/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.coverage
+*.py[cod]
+run/
+batch-output/
+release-output/
+dist/
+native-install/
+reviewed_cases/
+specimens/
+db/
+toolchain-matrix.json
+
+# Native build artifacts
+*.o
+*.a
+*.so
+*.so.*
+*.yarc
+*.compiled
+
+# Workstation configuration
+.env
+.venv/
+.idea/
+.vscode/
+.DS_Store
+coverage.json
+htmlcov/

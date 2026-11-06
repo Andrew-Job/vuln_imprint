@@ -1,0 +1,6 @@
+[submodule "external/yara-x"]
+	path = external/yara-x
+	url = https://github.com/VirusTotal/yara-x.git
+[submodule "external/elfio"]
+	path = external/elfio
+	url = https://github.com/serge1/ELFIO.git

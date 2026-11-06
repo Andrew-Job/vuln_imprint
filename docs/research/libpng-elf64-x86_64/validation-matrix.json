@@ -1,0 +1,201 @@
+{
+  "method": "external GNU objdump/readelf + VulnImprint restricted YARA source validator + reference byte matcher",
+  "native_yara_x_checked": false,
+  "unrelated_elf_count": 230,
+  "sample_paths_attested_by_sha256": true,
+  "cases": [
+    {
+      "cve": "CVE-2026-22695",
+      "patterns": 1,
+      "results": {
+        "rdkit": [],
+        "fiona": [],
+        "cadquery": [],
+        "torchvision": [],
+        "opencv": [
+          0
+        ],
+        "rasterio": [
+          0
+        ],
+        "pedalboard": [],
+        "debian": [],
+        "pillow": []
+      },
+      "asserted_positive_controls": [],
+      "asserted_fixed_controls": [],
+      "channel": "production"
+    },
+    {
+      "cve": "CVE-2026-22801",
+      "patterns": 4,
+      "results": {
+        "rdkit": [
+          0
+        ],
+        "fiona": [],
+        "cadquery": [
+          1
+        ],
+        "torchvision": [
+          2
+        ],
+        "opencv": [
+          3
+        ],
+        "rasterio": [
+          3
+        ],
+        "pedalboard": [],
+        "debian": [],
+        "pillow": []
+      },
+      "asserted_positive_controls": [],
+      "asserted_fixed_controls": [],
+      "channel": "production"
+    },
+    {
+      "cve": "CVE-2026-25646",
+      "patterns": 5,
+      "results": {
+        "rdkit": [
+          0
+        ],
+        "fiona": [
+          1
+        ],
+        "cadquery": [
+          2
+        ],
+        "torchvision": [
+          3
+        ],
+        "opencv": [
+          4
+        ],
+        "rasterio": [
+          4
+        ],
+        "pedalboard": [],
+        "debian": [],
+        "pillow": []
+      },
+      "asserted_positive_controls": [],
+      "asserted_fixed_controls": [],
+      "channel": "production"
+    },
+    {
+      "cve": "CVE-2026-33416",
+      "patterns": 10,
+      "results": {
+        "rdkit": [
+          0,
+          5
+        ],
+        "fiona": [
+          1,
+          6
+        ],
+        "cadquery": [
+          2,
+          7
+        ],
+        "torchvision": [
+          3,
+          4,
+          9
+        ],
+        "opencv": [
+          3,
+          4,
+          8
+        ],
+        "rasterio": [
+          3,
+          4,
+          8
+        ],
+        "pedalboard": [
+          0,
+          5
+        ],
+        "debian": [],
+        "pillow": []
+      },
+      "asserted_positive_controls": [
+        "cadquery",
+        "fiona",
+        "opencv",
+        "pedalboard",
+        "rasterio",
+        "rdkit",
+        "torchvision"
+      ],
+      "asserted_fixed_controls": [
+        "debian",
+        "pillow"
+      ],
+      "function": "png_set_PLTE",
+      "scope_note": "Both PLTE and tRNS pointer-alias variants covered on available builds; other compilers not yet covered",
+      "fix_commits": [
+        "23019269764e35ed8458e517f1897bd3c54820eb",
+        "a3a21443ed12bfa1ef46fa0d4fb2b74a0fa34a25",
+        "7ea9eea884a2328cc7fdcb3c0c00246a50d90667",
+        "c1b0318b393c90679e6fa5bc1d329fd5d5012ec1"
+      ],
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-33416",
+      "channel": "production"
+    },
+    {
+      "cve": "CVE-2026-34757",
+      "patterns": 5,
+      "results": {
+        "rdkit": [
+          0
+        ],
+        "fiona": [
+          1
+        ],
+        "cadquery": [
+          2
+        ],
+        "torchvision": [
+          4
+        ],
+        "opencv": [
+          3
+        ],
+        "rasterio": [
+          3
+        ],
+        "pedalboard": [
+          0
+        ],
+        "debian": [],
+        "pillow": []
+      },
+      "asserted_positive_controls": [
+        "cadquery",
+        "fiona",
+        "opencv",
+        "pedalboard",
+        "rasterio",
+        "rdkit",
+        "torchvision"
+      ],
+      "asserted_fixed_controls": [
+        "debian",
+        "pillow"
+      ],
+      "function": "png_set_hIST",
+      "scope_note": "hIST old UAF variant only; PLTE/tRNS regressions in 1.6.56 not covered",
+      "fix_commits": [
+        "398cbe3df03f4e11bb031e07f416dfdde3684e8a",
+        "55d20aaa322c9274491cda82c5cd4f99b48c6bcc"
+      ],
+      "source": "https://www.openwall.com/lists/oss-security/2026/04/09/2",
+      "channel": "production"
+    }
+  ],
+  "external_release_attestation": false
+}

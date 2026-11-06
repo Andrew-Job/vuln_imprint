@@ -1,0 +1,5 @@
+# Structured ELF machine-code mining. Exact versions reviewed as a set.
+# pyelftools: https://github.com/eliben/pyelftools (Public Domain)
+pyelftools==0.33
+# Capstone: https://github.com/capstone-engine/capstone (BSD-3-Clause)
+capstone==5.0.9

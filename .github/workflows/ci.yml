@@ -1,0 +1,97 @@
+name: VulnImprint CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# An obsolete PR build must not consume a native runner after a new push.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements-ci.txt
+            requirements-factory.txt
+            requirements-format.txt
+            requirements-security.txt
+      - run: python -m pip install -r requirements-ci.txt -r requirements-format.txt -r requirements-security.txt
+      - run: make format-check
+      - name: Validate CVE source and product tests
+        run: |
+          python -m scripts.check_cve_source_tree
+          python -m scripts.check_signature_sources
+          python -m pytest -q tests tests_release
+      - name: Validate changed CVE records
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python -m scripts.check_cve_pr --base "$BASE_SHA"
+      - run: python -m bandit -r factory tools scripts -ll -ii
+
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements-ci.txt
+            requirements-factory.txt
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # Rust toolchain action (toolchain 1.99.1)
+        with:
+          toolchain: '1.99.1'
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: external/yara-x -> target
+          shared-key: yarax-1.23.0-rust-1.99.1
+          key: cargo-c-0.10.26
+          cache-on-failure: true
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - name: Install pinned cargo-c
+        run: cargo +1.99.1 install cargo-c --version 0.10.26 --locked
+      - name: Build and test native product
+        run: |
+          python -m pip install -r requirements-ci.txt
+          bash scripts/bootstrap_yarax.sh --capi-only
+          bash scripts/build_yarax_python.sh
+          PKG_CONFIG_PATH="$HOME/.local/lib/pkgconfig" cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+          python scripts/native_yarax_smoke.py --scanner build/scanner/vulnimprint-scan
+          python -m pytest -q tests_integration
+      - name: Verify compiled test and production databases
+        run: |
+          python -m tools.production_db assemble --signatures signatures \
+            --channel test --output /tmp/vulnimprint-db-test \
+            --scanner build/scanner/vulnimprint-scan
+          python -m tools.production_db assemble --signatures signatures \
+            --channel production --output /tmp/vulnimprint-db-production \
+            --scanner build/scanner/vulnimprint-scan
+          python -m tools.production_db verify \
+            --database /tmp/vulnimprint-db-production \
+            --scanner build/scanner/vulnimprint-scan
+          python -m scripts.check_native_cve_signatures \
+            --scanner build/scanner/vulnimprint-scan \
+            --database /tmp/vulnimprint-db-production/database.yarc
