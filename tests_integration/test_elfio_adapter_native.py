@@ -123,6 +123,18 @@ int main(int argc, char** argv) {
         }
       }
       if (!mutated_nonexec) return 24;
+      // SHT_NULL must not be selected even if malicious flags claim it is
+      // executable and its file span is outside the input buffer.
+      auto poisoned_null = bytes;
+      Write64(poisoned_null, shoff + 8, 4);  // SHF_EXECINSTR
+      Write64(poisoned_null, shoff + 24, bytes.size() + 4096);
+      Write64(poisoned_null, shoff + 32, 16);
+      const auto safe_regions = vulnimprint::executable_regions(poisoned_null);
+      if (safe_regions.empty()) return 27;
+      for (const auto& region : safe_regions) {
+        if (region.offset > bytes.size() ||
+            region.length > bytes.size() - region.offset) return 28;
+      }
     }
     if (i == 2) {
       auto broken_segments = bytes;

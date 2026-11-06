@@ -215,6 +215,7 @@ std::vector<Segment> executable_regions(const std::vector<std::uint8_t>& file) {
     if (type == ELFIO::ET_REL) {
         for (const auto& section : reader.sections) {
             if ((section->get_flags() & ELFIO::SHF_EXECINSTR) == 0 ||
+                section->get_type() == ELFIO::SHT_NULL ||
                 section->get_type() == ELFIO::SHT_NOBITS ||
                 section->get_size() == 0) {
                 continue;
