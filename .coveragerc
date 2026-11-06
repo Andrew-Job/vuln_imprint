@@ -1,0 +1,14 @@
+[run]
+branch = True
+source =
+    factory
+    tools
+    scripts
+parallel = False
+
+[report]
+show_missing = True
+skip_covered = True
+# Coverage of our own code, not YARA-X, compilers, binutils or upstream projects.
+omit =
+    */__pycache__/*

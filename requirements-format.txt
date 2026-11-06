@@ -1,0 +1,2 @@
+# Google Python formatting preset. C++ uses clang-format 19.x separately.
+yapf==0.43.0

@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "git_submodules": [
+    {
+      "path": "external/yara-x",
+      "url": "https://github.com/VirusTotal/yara-x.git",
+      "tag": "v1.23.0",
+      "commit": "afe4585b12f56c698794dc80b3d28ddb87b56c0a",
+      "license": "BSD-3-Clause",
+      "use": "YARA-X matching runtime (yara-x-capi)"
+    },
+    {
+      "path": "external/elfio",
+      "url": "https://github.com/serge1/ELFIO.git",
+      "tag": "Release_3.12",
+      "commit": "8ae6cec5d60495822ecd57d736f66149da9b1830",
+      "license": "MIT",
+      "use": "Header-only C++ ELF structural parsing (scanner)"
+    }
+  ],
+  "rust_toolchain": "1.99.1",
+  "cargo_c_version": "0.10.26",
+  "python_factory": {
+    "pyelftools": "0.33",
+    "capstone": "5.0.9"
+  },
+  "release_sbom_tool": {
+    "name": "syft",
+    "version": "1.57.0",
+    "platform": "linux_amd64",
+    "repository": "anchore/syft",
+    "verification": "github_immutable_release_attestation"
+  },
+  "maturin_version": "1.16.0"
+}
