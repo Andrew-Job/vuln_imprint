@@ -38,6 +38,22 @@ jobs:
           [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
           printf 'version=%s\nsource_sha=%s\n' "$GITHUB_REF_NAME" "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+      - name: Restore YARA-X build cache from main
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin/cargo-capi
+            ~/.cargo/bin/cargo-cbuild
+            ~/.cargo/bin/cargo-cinstall
+            ~/.cargo/bin/cargo-ctest
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/src
+            ~/.cargo/git
+            external/yara-x/target
+          key: ${{ runner.os }}-${{ runner.arch }}-rust-1.99.1-cargo-c-0.10.26-yarax-${{ hashFiles('external/DEPENDENCIES.json', 'external/yara-x/Cargo.lock') }}-v2
       - name: Build pinned official YARA-X and native scanner
         run: |
           sudo apt-get update

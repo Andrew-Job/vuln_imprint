@@ -95,13 +95,32 @@ jobs:
             ~/.cargo/.crates2.json
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
+            ~/.cargo/registry/src
+            ~/.cargo/git
             external/yara-x/target
-          key: ${{ runner.os }}-${{ runner.arch }}-rust-1.99.1-cargo-c-0.10.26-yarax-${{ hashFiles('external/yara-x/Cargo.lock', 'scripts/bootstrap_yarax.sh', 'scripts/build_yarax_python.sh') }}-v1
+          key: ${{ runner.os }}-${{ runner.arch }}-rust-1.99.1-cargo-c-0.10.26-yarax-${{ hashFiles('external/DEPENDENCIES.json', 'external/yara-x/Cargo.lock') }}-v2
       - name: Build actual YARA-X C API and Python binding
         run: |
           bash scripts/bootstrap_yarax.sh --capi-only
           echo "PKG_CONFIG_PATH=$HOME/.local/lib/pkgconfig" >> "$GITHUB_ENV"
           bash scripts/build_yarax_python.sh
+      - name: Save YARA-X build cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.rust_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin/cargo-capi
+            ~/.cargo/bin/cargo-cbuild
+            ~/.cargo/bin/cargo-cinstall
+            ~/.cargo/bin/cargo-ctest
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/src
+            ~/.cargo/git
+            external/yara-x/target
+          key: ${{ steps.rust_cache.outputs.cache-primary-key }}
       - name: Build Scanner and exercise executable ELF behavior
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -122,18 +141,3 @@ jobs:
           python -m scripts.check_native_cve_signatures \
             --scanner build/scanner/vulnimprint-scan \
             --database /tmp/vulnimprint-db-production/database.yarc
-      - name: Save YARA-X build cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.rust_cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/bin/cargo-capi
-            ~/.cargo/bin/cargo-cbuild
-            ~/.cargo/bin/cargo-cinstall
-            ~/.cargo/bin/cargo-ctest
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            external/yara-x/target
-          key: ${{ steps.rust_cache.outputs.cache-primary-key }}
