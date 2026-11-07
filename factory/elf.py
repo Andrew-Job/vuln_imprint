@@ -65,8 +65,11 @@ class ELF:
             self.segments = []
             self._section_indexes = {}
             for index, section in enumerate(self._file.iter_sections()):
-                if not section['sh_flags'] & 0x4 or section[
-                        'sh_type'] == 'SHT_NOBITS':
+                if section['sh_type'] not in ('SHT_NULL', 'SHT_NOBITS'):
+                    self._check_range(int(section['sh_offset']),
+                                      int(section['sh_size']))
+                if (section['sh_type'] in ('SHT_NULL', 'SHT_NOBITS') or
+                        not section['sh_flags'] & 0x4):
                     continue
                 address = int(section['sh_addr'])
                 offset = int(section['sh_offset'])
@@ -78,16 +81,14 @@ class ELF:
                 self.sections[section.name] = (address, offset, size)
                 self._section_indexes[index] = section.name
             for segment in self._file.iter_segments():
-                if segment['p_type'] != 'PT_LOAD' or not (
-                        int(segment['p_flags']) & 1):
+                if segment['p_type'] != 'PT_LOAD':
                     continue
-                offset, size = int(segment['p_offset']), int(
-                    segment['p_filesz'])
+                offset = int(segment['p_offset'])
+                size = int(segment['p_filesz'])
                 self._check_range(offset, size)
                 if size > int(segment['p_memsz']):
-                    raise UnsupportedBinary(
-                        'ELF executable segment filesz exceeds memsz')
-                if size:
+                    raise UnsupportedBinary('ELF PT_LOAD filesz exceeds memsz')
+                if size and int(segment['p_flags']) & 1:
                     self.segments.append(
                         (int(segment['p_vaddr']), offset, size))
             if (self.kind == 1 and not self.sections) or (self.kind != 1 and
@@ -98,19 +99,29 @@ class ELF:
                 for name, (address, offset, size) in self.sections.items():
                     if not size:
                         continue
-                    containing = [
-                        (va, file_offset, length)
-                        for va, file_offset, length in self.segments
-                        if va <= address and size <= length - (address - va)
-                    ]
-                    if not containing:
-                        continue  # non-loaded debug/executable metadata
-                    if not any(offset == file_offset + address - va
-                               for va, file_offset, _ in containing):
-                        raise UnsupportedBinary(
-                            f'executable section {name} does not map to PT_LOAD bytes'
-                        )
-                    self._mapped_sections[name] = (address, offset, size)
+                    pieces = []
+                    for segment in self.segments:
+                        segment_va, segment_offset, segment_size = segment
+                        start = max(offset, segment_offset)
+                        end = min(offset + size, segment_offset + segment_size)
+                        if start >= end:
+                            continue
+                        section_va = address + start - offset
+                        mapped_va = segment_va + start - segment_offset
+                        if section_va != mapped_va:
+                            raise UnsupportedBinary(
+                                f'executable section {name} '
+                                'does not map to PT_LOAD bytes')
+                        if mapped_va + end - start - 1 > 0xffffffffffffffff:
+                            raise UnsupportedBinary(
+                                'ELF virtual address overflow')
+                        pieces.append((mapped_va, start, end - start))
+                    if pieces:
+                        self._mapped_sections[name] = pieces
+                if self._file.num_sections() and not self._mapped_sections:
+                    raise UnsupportedBinary(
+                        'no file-backed executable sections in executable segments'
+                    )
         except (ELFError, EOFError, IndexError, OverflowError,
                 ValueError) as exc:
             if isinstance(exc, UnsupportedBinary):
@@ -125,8 +136,15 @@ class ELF:
 
     def executable_ranges(self) -> list[tuple[int, bytes]]:
         """File-offset-based ranges used by the Factory reference matcher."""
-        blocks = self.segments if self.kind != 1 else list(
-            self.sections.values())
+        if self.kind == 1:
+            blocks = list(self.sections.values())
+        elif self._file.num_sections():
+            blocks = [
+                piece for pieces in self._mapped_sections.values()
+                for piece in pieces
+            ]
+        else:
+            blocks = self.segments
         return [(offset, self.raw[offset:offset + size])
                 for _, offset, size in blocks]
 
@@ -136,12 +154,10 @@ class ELF:
             return [(name, address, offset, self.raw[offset:offset + size])
                     for name, (address, offset, size) in self.sections.items()
                     if size]
-        # Decode executable sections where available to avoid adjacent data.
-        # For stripped sectionless images, segment-based decoding remains possible.
-        if self.sections:
+        if self._file.num_sections():
             return [(name, address, offset, self.raw[offset:offset + size])
-                    for name, (address, offset,
-                               size) in self._mapped_sections.items()]
+                    for name, pieces in self._mapped_sections.items()
+                    for address, offset, size in pieces]
         return [(f'PT_LOAD_{i}', address, offset,
                  self.raw[offset:offset + size])
                 for i, (address, offset, size) in enumerate(self.segments)]

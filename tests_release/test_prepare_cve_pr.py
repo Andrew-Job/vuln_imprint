@@ -1,36 +1,38 @@
-"""First-party tests of PR preparation: no substitute YARA-X engine."""
+"""PR preparation tests for CVE-owned records and native source compilation."""
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from tools.prepare_cve_pr import prepare
+from tools.manual_rules import initialize
 from tools.production_db import ReleaseRejected
+
+PATTERN = ' '.join(f'{value:02X}' for value in range(32))
 
 
 def _fixture(tmp_path: Path):
     repo = tmp_path / "repo"
-    (repo / "signatures" / "validated").mkdir(parents=True)
+    (repo / "signatures").mkdir(parents=True)
     case = tmp_path / "cases" / "CVE-2026-25646"
-    case.mkdir(parents=True)
-    (case / "pack.json").write_text(json.dumps({"cve": case.name}))
-    (case / "rules-exec.yar").write_text("rule test { condition: true }\n")
-    (case / "reviewed-evidence.json").write_text("{}\n")
+    initialize("CVE-2026-25646", [PATTERN], case, channel="test")
     scanner = tmp_path / "scanner"
-    scanner.write_text("native scanner fixture, not executed")
+    scanner.write_text("native scanner fixture, intercepted in tests")
     scanner.chmod(0o755)
     return repo, case, scanner
 
 
-def test_rejected_validation_cannot_write_production_source(tmp_path):
-    repo, case, scanner = _fixture(tmp_path)
-    with patch("tools.prepare_cve_pr.validate_case",
-               side_effect=ReleaseRejected("no holdout")):
-        with pytest.raises(ReleaseRejected, match="no holdout"):
-            prepare(case, scanner, repo)
-    assert not (repo / "signatures" / "validated" / case.name).exists()
+def _native_compile(monkeypatch):
+
+    def run(argv, **_kwargs):
+        output = Path(argv[argv.index("--output") + 1])
+        output.write_bytes(b"compiled fixture")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("tools.prepare_cve_pr.subprocess.run", run)
 
 
 def test_missing_native_scanner_fails_closed(tmp_path):
@@ -48,34 +50,42 @@ def test_symlinked_case_input_rejected(tmp_path):
         prepare(case, scanner, repo)
 
 
-def test_successful_native_evidence_can_prepare_pr_source(tmp_path):
+def test_successful_native_compile_prepares_test_record(tmp_path, monkeypatch):
     repo, case, scanner = _fixture(tmp_path)
-    # Isolate transport/rollback behavior: validation and Git gate have their
-    # own dedicated tests and are not replaced in release CI.
-    with patch("tools.prepare_cve_pr.validate_case",
-               return_value={
-                   "quality": "CVE_SPECIFIC_VALIDATED",
-                   "samples": [1, 2, 3],
-               }), patch("tools.prepare_cve_pr.check",
-                         return_value=[case.name]):
-        result = prepare(case, scanner, repo)
+    _native_compile(monkeypatch)
+    result = prepare(case, scanner, repo)
     assert result["status"] == "READY_FOR_REVIEW"
-    assert result["independent_samples"] == 3
+    assert result["record_count"] == 1
+    assert result["channels"] == ["test"]
     assert sorted(
-        x.name
-        for x in (repo / "signatures" / "validated" / case.name).iterdir()) == [
-            "pack.json", "reviewed-evidence.json", "rules-exec.yar"
+        path.name for path in (repo / "signatures" / case.name).iterdir()) == [
+            "pack.json", "rules-exec.yar"
         ]
 
 
-def test_source_tree_gate_failure_rolls_back(tmp_path):
+def test_second_record_for_existing_cve_is_merged_independently(
+        tmp_path, monkeypatch):
     repo, case, scanner = _fixture(tmp_path)
-    with patch("tools.prepare_cve_pr.validate_case",
-               return_value={
-                   "quality": "CVE_SPECIFIC_VALIDATED",
-                   "samples": [],
-               }), patch("tools.prepare_cve_pr.check",
-                         side_effect=ReleaseRejected("source gate failed")):
+    _native_compile(monkeypatch)
+    prepare(case, scanner, repo)
+    second = tmp_path / "cases-second" / case.name
+    initialize(case.name, [PATTERN],
+               second,
+               channel="test",
+               record_key="second")
+    result = prepare(second, scanner, repo)
+    merged = json.loads(
+        (repo / "signatures" / case.name / "pack.json").read_text())
+    assert result["record_count"] == 2
+    assert len(merged["records"]) == 2
+    assert len({record["record_id"] for record in merged["records"]}) == 2
+
+
+def test_source_tree_gate_failure_rolls_back(tmp_path, monkeypatch):
+    repo, case, scanner = _fixture(tmp_path)
+    _native_compile(monkeypatch)
+    with patch("tools.prepare_cve_pr.check",
+               side_effect=[[], ReleaseRejected("source gate failed")]):
         with pytest.raises(ReleaseRejected, match="source gate failed"):
             prepare(case, scanner, repo)
-    assert not (repo / "signatures" / "validated" / case.name).exists()
+    assert not (repo / "signatures" / case.name).exists()

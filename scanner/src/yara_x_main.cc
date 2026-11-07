@@ -30,6 +30,7 @@
 #include <utility>
 #include <vector>
 
+#include "vulnimprint/cve_metadata.h"
 #include "vulnimprint/elf.h"
 #include "vulnimprint/json.h"
 #include "vulnimprint/match_location.h"
@@ -180,7 +181,7 @@ void save_compiled(YRX_RULES* rules, const fs::path& path) {
 }
 
 struct Hit {
-    std::string issue, cves, rule, pattern, evidence;
+    std::string issue, rule, pattern;
     std::size_t offset = 0, length = 0;
     bool executable = false;
     std::optional<std::uint64_t> va;
@@ -193,7 +194,7 @@ struct Report {
 };
 struct CallbackState {
     std::vector<Hit>* hits;
-    std::string issue, cves, rule, evidence, pattern;
+    std::string issue, rule, pattern;
     std::size_t max_hits;
     std::size_t max_per_pattern = 0;
     std::size_t observed_per_pattern = 0;
@@ -245,10 +246,12 @@ void metadata_cb(const YRX_METADATA* metadata, void* user_data) noexcept {
             return;
         }
         const std::string key(metadata->identifier);
-        if (key == "cve" || key == "issue")
+        if (key == "cve" || key == "issue") {
             state->issue = metadata->value.string;
-        if (key == "cves") state->cves = metadata->value.string;
-        if (key == "evidence") state->evidence = metadata->value.string;
+            if (!vulnimprint::IsCve(state->issue)) {
+                throw std::runtime_error("Invalid CVE metadata");
+            }
+        }
     });
 }
 
@@ -280,10 +283,10 @@ void match_cb(const YRX_MATCH* match, void* user_data) noexcept {
             state->truncated = true;
             return;
         }
-        Hit hit{
-            state->issue,   state->cves,     state->rule,
-            state->pattern, state->evidence, state->base_offset + match->offset,
-            match->length,  false,           std::nullopt};
+        Hit hit{state->issue,   state->rule,
+                state->pattern, state->base_offset + match->offset,
+                match->length,  false,
+                std::nullopt};
         const auto location = vulnimprint::LocateMatch(
             *state->executable_regions, hit.offset, hit.length);
         hit.executable = location.executable;
@@ -308,9 +311,7 @@ void rule_cb(const YRX_RULE* rule, void* user_data) noexcept {
     auto* state = static_cast<CallbackState*>(user_data);
     ffi_guard(state, [&] {
         state->rule = identifier(rule);
-        state->issue = state->rule;
-        state->cves.clear();
-        state->evidence.clear();
+        state->issue.clear();
         if (yrx_rule_iter_metadata(rule, metadata_cb, user_data) !=
             YRX_SUCCESS) {
             state->failed = true;
@@ -517,13 +518,22 @@ Report process(const fs::path& path, YRX_SCANNER* scanner,
 }
 
 void print_hit(std::ostream& output, const Hit& hit) {
-    output << "{\"cve\":" << vulnimprint::JsonString(hit.issue) << ",\"cves\":"
-           << vulnimprint::JsonString(hit.cves.empty() ? hit.issue : hit.cves)
-           << ",\"rule\":" << vulnimprint::JsonString(hit.rule)
+    output << "{\"cve\":";
+    if (hit.issue.empty()) {
+        output << "null";
+    } else {
+        output << vulnimprint::JsonString(hit.issue);
+    }
+    output << ",\"record_id\":";
+    if (!hit.issue.empty() && vulnimprint::IsRecordId(hit.rule)) {
+        output << vulnimprint::JsonString(hit.rule);
+    } else {
+        output << "null";
+    }
+    output << ",\"rule\":" << vulnimprint::JsonString(hit.rule)
            << ",\"pattern\":" << vulnimprint::JsonString(hit.pattern)
            << ",\"file_offset\":" << vulnimprint::JsonString(hex(hit.offset))
            << ",\"length\":" << hit.length
-           << ",\"evidence\":" << vulnimprint::JsonString(hit.evidence)
            << ",\"executable\":" << (hit.executable ? "true" : "false")
            << ",\"virtual_address\":";
     if (hit.va) {
@@ -564,10 +574,12 @@ void print_json(const std::vector<Report>& results, std::size_t rules_count,
         if (!result.error.empty()) ++errors;
         if (result.truncated) ++truncated;
         hits += result.hits.size();
-        for (const auto& hit : result.hits) unique_cves.insert(hit.issue);
+        for (const auto& hit : result.hits) {
+            if (!hit.issue.empty()) unique_cves.insert(hit.issue);
+        }
     }
     std::ostream& output = std::cout;
-    output << "{\"schema\":\"vulnimprint.scan.yarax.v1\""
+    output << "{\"schema\":\"vulnimprint.scan.yarax.v2\""
            << ",\"engine\":\"yara-x\",\"rules\":" << rules_count
            << ",\"threads\":" << threads
            << ",\"files_scanned\":" << results.size()

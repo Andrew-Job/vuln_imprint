@@ -21,11 +21,12 @@ cargo +1.99.1 install cargo-c --version 0.10.26 --locked
 export CARGO_TARGET_DIR="$ROOT/external/yara-x/target"
 (
     cd external/yara-x
-    cargo +1.99.1 cinstall -p yara-x-capi --release --locked --prefix "$YARAX_PREFIX" \
+    cargo +1.99.1 cinstall -p yara-x-capi --profile release-lto --library-type staticlib \
+        --locked --prefix "$YARAX_PREFIX" \
         --libdir "$YARAX_PREFIX/lib"
 )
 export PKG_CONFIG_PATH="$YARAX_PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-export LD_LIBRARY_PATH="$YARAX_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+test -s "$YARAX_PREFIX/lib/libyara_x_capi.a" || { echo "YARA-X static library missing" >&2; exit 2; }
 version="$(pkg-config --modversion yara_x_capi)"
 test "$version" = '1.23.0' || { echo "Wrong YARA-X C API version: $version" >&2; exit 2; }
 if [[ "$BUILD_SCANNER" == "1" ]]; then

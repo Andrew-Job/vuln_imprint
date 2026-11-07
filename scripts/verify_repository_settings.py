@@ -119,6 +119,85 @@ def verify_production_environment(repo: str) -> None:
             'production deployment must be restricted to v* tags')
 
 
+REQUIRED_CI = frozenset(("google-style", "offline", "security", "native"))
+
+
+def _require_checks(items) -> None:
+    if not isinstance(items, (list, tuple, set)):
+        raise RepositoryNotReady("main has no required CI status checks")
+    names = set()
+    for item in items:
+        if isinstance(item, str):
+            names.add(item)
+        elif isinstance(item, dict) and isinstance(item.get("context"), str):
+            names.add(item["context"])
+    for job in REQUIRED_CI:
+        if not any(name == job or name.endswith(" / " +
+                                                job) or name.endswith("/" + job)
+                   for name in names):
+            raise RepositoryNotReady(
+                f"main protection must require source CI job {job}")
+
+
+def verify_main_protection(repo: str) -> None:
+    """Accept one fully enforcing classic protection or active branch ruleset."""
+    try:
+        classic = get_json(f"repos/{repo}/branches/main/protection")
+        reviews = classic.get("required_pull_request_reviews") or {}
+        if (type(reviews.get("required_approving_review_count")) is int and
+                reviews["required_approving_review_count"] >= 1 and
+            (reviews.get("dismiss_stale_reviews") is True or
+             reviews.get("require_last_push_approval") is True) and
+            (classic.get("enforce_admins") or {}).get("enabled") is True and
+            (classic.get("restrictions") is None)):
+            checks = classic.get("required_status_checks") or {}
+            _require_checks(
+                list(checks.get("contexts") or ()) +
+                list(checks.get("checks") or ()))
+            return
+    except RepositoryNotReady:
+        pass
+    rulesets = get_list(f"repos/{repo}/rulesets?includes_parents=true")
+    for rule in rulesets:
+        if (not isinstance(rule, dict) or rule.get("target") != "branch" or
+                rule.get("enforcement") != "active" or
+                type(rule.get("id")) is not int):
+            continue
+        detail = get_json(f"repos/{repo}/rulesets/{rule['id']}")
+        refs = (detail.get("conditions") or {}).get("ref_name") or {}
+        if (not any(name in {"refs/heads/main", "~DEFAULT_BRANCH"}
+                    for name in refs.get("include") or ()) or
+                refs.get("exclude") or detail.get("bypass_actors")):
+            continue
+        rules = {
+            r.get("type"): r.get("parameters") or {}
+            for r in detail.get("rules") or ()
+            if isinstance(r, dict)
+        }
+        approval = rules.get("pull_request",
+                             {}).get("required_approving_review_count")
+        if type(approval) is not int or approval < 1:
+            continue
+        if not (rules["pull_request"].get("dismiss_stale_reviews_on_push")
+                is True or
+                rules["pull_request"].get("require_last_push_approval")
+                is True):
+            continue
+        try:
+            _require_checks(
+                rules.get("required_status_checks",
+                          {}).get("required_status_checks"))
+        except RepositoryNotReady:
+            continue
+        # Block forced updates and deletions of the protected branch.
+        if "non_fast_forward" not in rules or "deletion" not in rules:
+            continue
+        return
+    raise RepositoryNotReady(
+        "main requires an enforcing review and full CI policy (classic or ruleset)"
+    )
+
+
 def verify(repo: str) -> None:
     if not REPO.fullmatch(repo) or repo.lower().endswith('/.'):
         raise RepositoryNotReady('expected OWNER/vuln_imprint')
@@ -129,27 +208,7 @@ def verify(repo: str) -> None:
     immutability = get_json(f'repos/{repo}/immutable-releases')
     if immutability.get('enabled') is not True:
         raise RepositoryNotReady('immutable GitHub Releases must be enabled')
-    # A classic branch protection rule or equivalent ruleset must be configured.
-    # github REST /branches/main/protection gives a definitive classic policy.
-    # Rulesets-only installations need separate explicit administration review.
-    branch = get_json(f'repos/{repo}/branches/main/protection')
-    if not branch.get('required_pull_request_reviews'):
-        raise RepositoryNotReady(
-            'main requires an actual pull request review policy')
-    checks = branch.get('required_status_checks') or {}
-    required = set(checks.get('contexts') or ())
-    required.update(
-        item.get('context', '')
-        for item in checks.get('checks') or ()
-        if isinstance(item, dict))
-    for job in ('google-style', 'offline', 'security', 'native'):
-        if not any(name == job or name.endswith(' / ' +
-                                                job) or name.endswith('/' + job)
-                   for name in required):
-            raise RepositoryNotReady(
-                f'main protection must require source CI job {job}')
-    if not branch.get('enforce_admins', {}).get('enabled'):
-        raise RepositoryNotReady('main protection must include administrators')
+    verify_main_protection(repo)
     verify_release_tag_ruleset(repo)
     verify_production_environment(repo)
     print(

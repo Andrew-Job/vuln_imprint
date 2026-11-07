@@ -119,3 +119,35 @@ int main(void){printf("%d\\n",check_count(10));return 0;}
                               tmp_path / name)['detected']
     assert not reference_scan(tmp_path / 'out/pack.json',
                               tmp_path / 'host_fixed')['detected']
+
+
+def test_validate_yara_x_builds_complete_cve_owned_record(
+        monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from factory import pipeline
+
+    captured = {}
+
+    class FakeScanner:
+
+        def scan(self, _path):
+            return {'matches': [{'pattern': '$v0', 'file_offset': 123}]}
+
+    def compile_source(source):
+        captured['source'] = source
+        return FakeScanner()
+
+    monkeypatch.setattr(pipeline.YaraXScanner, 'compile', compile_source)
+    monkeypatch.setattr(
+        pipeline, 'scan_patterns',
+        lambda _patterns, _sample: [SimpleNamespace(rule=0, file_offset=123)])
+    sample = SimpleNamespace(id='affected', path=tmp_path / 'sample.elf')
+    result = pipeline.validate_yara_x('CVE-2099-12345',
+                                      [Pattern.from_hex('48 83 EC 28')],
+                                      [sample])
+
+    assert result['status'] == 'PASS'
+    assert 'rule VI_' in captured['source']
+    assert 'cve = "CVE-2099-12345"' in captured['source']
+    assert 'channel = "test"' in captured['source']
+    assert 'cves =' not in captured['source']

@@ -71,7 +71,7 @@ class ArtifactStore:
             'blob': {
                 'algorithm': 'sha256',
                 'digest': h,
-                'size': Path(file).stat().st_size,
+                'size': blob.stat().st_size,
                 'path': str(blob.relative_to(self.root))
             },
             'metadata': metadata or {}
@@ -83,17 +83,37 @@ class ArtifactStore:
                        sort_keys=True,
                        separators=(',', ':')).encode()).hexdigest()[:10]
         path = folder / f'{specimen_id}--{h[:12]}--{metadata_digest}.json'
-        path.write_text(json.dumps(record, indent=2, sort_keys=True) + '\n')
+        # Atomic metadata publication: concurrent users must not observe
+        # truncated or partially written JSON files.
+        fd, temp = tempfile.mkstemp(dir=folder, prefix='.record-')
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as output:
+                output.write(
+                    json.dumps(record, indent=2, sort_keys=True) + '\n')
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temp, path)
+        finally:
+            if os.path.exists(temp):
+                os.unlink(temp)
         return record
 
     def verify(self, record: dict) -> bool:
         """Verify a recorded blob without following paths outside the CAS root."""
         try:
             item = record['blob']
-            relative = Path(item['path'])
-            if relative.is_absolute() or '..' in relative.parts:
+            digest = item['digest']
+            if (item['algorithm'] != 'sha256' or not isinstance(digest, str) or
+                    not re.fullmatch(r'[0-9a-f]{64}', digest)):
                 return False
-            blob = (self.root / relative).resolve(strict=True)
+            relative = Path(item['path'])
+            expected_path = Path('blobs') / 'sha256' / digest[:2] / digest
+            if relative != expected_path:
+                return False
+            untrusted = self.root / relative
+            if untrusted.is_symlink():
+                return False
+            blob = untrusted.resolve(strict=True)
             if not blob.is_relative_to(self.root) or not blob.is_file():
                 return False
             if blob.stat().st_size != item['size']:

@@ -30,7 +30,9 @@ def main(argv=None):
                        default=Path('run/research-catalog'))
     multi.add_argument('--output', type=Path, required=True)
     multi.add_argument('--store', type=Path)
-    multi.add_argument('--include-experimental', action='store_true')
+    multi.add_argument('--channel',
+                       choices=['test', 'production'],
+                       default='test')
     multi.add_argument('--no-compile', action='store_true')
     freeze = sub.add_parser(
         'freeze', help='Lock upstream Git tags to full immutable commits')
@@ -44,11 +46,10 @@ def main(argv=None):
                       choices=['yara-x', 'reference'],
                       default='yara-x')
     db = sub.add_parser(
-        'database',
-        help='Compile quality-gated CVE packs into a YARA-X source database')
+        'database', help='Build a CVE-owned test or production YARA-X database')
     db.add_argument('--packs', type=Path, required=True)
     db.add_argument('--output', type=Path, required=True)
-    db.add_argument('--allow-experimental', action='store_true')
+    db.add_argument('--channel', choices=['test', 'production'], default='test')
     db_compile = sub.add_parser(
         'compile-db',
         help=
@@ -83,7 +84,7 @@ def main(argv=None):
                              args.output,
                              store=args.store or args.output / 'specimen-store',
                              compile_native=not args.no_compile,
-                             include_experimental=args.include_experimental)
+                             channel=args.channel)
             print(
                 json.dumps(
                     {
@@ -115,7 +116,7 @@ def main(argv=None):
                                                  'QUALITY_REJECTED') else 2
         if args.cmd == 'database':
             obj = merge_packs([x for x in args.packs.iterdir() if x.is_dir()],
-                              args.output, args.allow_experimental)
+                              args.output, args.channel)
             print(json.dumps(obj, indent=2))
             return 0
         if args.cmd == 'compile-db':

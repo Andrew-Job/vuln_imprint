@@ -3,12 +3,15 @@
 The publisher signs complete release artifacts using GitHub Artifact
 Attestations (Sigstore/OIDC). YARA-X itself does not sign `.yar` or `.yarc`
 files; a compiled database is not authenticated without the release trust
-chain. Git-reviewed source approval and release signing are distinct.
+chain. Git-reviewed source integrity and release signing are distinct.
 
 The supported distribution is **one application archive** accompanied by
-`SBOM.spdx.json`, `release-contents.json` and `SHA256SUMS`. All admitted CVEs
-under `signatures/validated/` are compiled into the database inside that
-archive. There is no individual CVE signature or standalone DB updater.
+`SBOM.spdx.json`, `release-contents.json` and `SHA256SUMS`. The production
+archive contains all Git-tracked records assigned to the `production` channel.
+Records assigned to `test` are excluded. Each DB record belongs to exactly
+one CVE; records with identical patterns under different CVEs remain separate
+and independently identified. The inclusion channel does not assert
+detection correctness.
 
 ## Consumer verification
 

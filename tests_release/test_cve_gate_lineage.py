@@ -8,6 +8,7 @@ import json
 import pytest
 
 from tools import production_db
+from factory.signature_identity import new_record_id, record_sha256
 
 CVE = 'CVE-2026-25646'
 
@@ -25,13 +26,9 @@ def make_case(tmp_path, monkeypatch):
         production_db, 'native_scan', lambda scanner, rulefile, target: {
             'matches': ([{
                 'cve': CVE,
+                'record_id': new_record_id(CVE),
                 'executable': True
             }] if target.name.startswith('affected-') else [])
-        })
-    monkeypatch.setattr(
-        production_db, 'probe_compiler', lambda *a, **kw: {
-            'binary_sha256': 'c' * 64,
-            'target': 'x86_64-linux-gnu'
         })
     samples = []
 
@@ -117,14 +114,65 @@ def make_case(tmp_path, monkeypatch):
     add('backport', 'backport-one', ('gcc', 11, '-O2'))
     for n in range(20):
         add('unrelated', f'unrelated-{n}')
+    (case / 'pack.json').write_text(
+        json.dumps({
+            'schema_version':
+                3,
+            'cve':
+                CVE,
+            'records': [{
+                'record_id':
+                    new_record_id(CVE),
+                'channel':
+                    'production',
+                'source_type':
+                    'factory',
+                'supported_profiles': [{
+                    'compiler_family': family,
+                    'compiler_major': major,
+                    'optimization': opt
+                }
+                                       for family, majors in (('gcc', (11, 12)),
+                                                              ('clang', (14,
+                                                                         15)))
+                                       for major in majors
+                                       for opt in ('-O2', '-O3')],
+                'platform': {
+                    'os': 'linux',
+                    'format': 'ELF',
+                    'arch': 'x86-64',
+                    'bits': 64,
+                    'abi': 'sysv'
+                },
+                'rules': [{
+                    'id': 'p0',
+                    'hex': '90 ' * 28,
+                    'length': 28,
+                    'fixed_bytes': 28
+                }],
+            }],
+        }))
     evidence = {
-        'schema_version': 2,
-        'cve': CVE,
-        'quality': 'CVE_SPECIFIC_VALIDATED',
-        'rules_sha256': production_db.sha256(rules),
-        'pack_sha256': production_db.sha256(pack),
+        'schema_version':
+            3,
+        'cve':
+            CVE,
+        'rules_sha256':
+            production_db.sha256(rules),
+        'pack_sha256':
+            production_db.sha256(pack),
         'training_lineages': ['training-different'],
-        'samples': samples,
+        'samples':
+            samples,
+        'records': [{
+            'record_id':
+                new_record_id(CVE),
+            'record_sha256':
+                record_sha256(
+                    json.loads((case / 'pack.json').read_text())['records'][0]),
+            'training_lineages': ['training-different'],
+            'sample_ids': [sample['id'] for sample in samples],
+        }],
     }
     (case / 'fake_scanner').write_bytes(b'fake scanner for policy tests only')
     path = case / 'reviewed-evidence.json'
@@ -149,24 +197,30 @@ def test_fixed_lineages_are_independent_of_backport_lineages(
 def test_source_pack_rejects_platform_extra_that_changes_rule_id(tmp_path):
     pack = {
         'schema_version':
-            1,
+            3,
         'cve':
             CVE,
-        'status':
-            'CVE_SPECIFIC_VALIDATED',
-        'platform': {
-            'os': 'linux',
-            'format': 'ELF',
-            'arch': 'x86-64',
-            'bits': 64,
-            'abi': 'sysv',
-            'compiler': 'gcc'
-        },
-        'rules': [{
-            'id': 'first',
-            'hex': '90 ' * 32,
-            'length': 32,
-            'fixed_bytes': 32
+        'records': [{
+            'record_id':
+                new_record_id(CVE),
+            'channel':
+                'production',
+            'source_type':
+                'factory',
+            'platform': {
+                'os': 'linux',
+                'format': 'ELF',
+                'arch': 'x86-64',
+                'bits': 64,
+                'abi': 'sysv',
+                'compiler': 'gcc'
+            },
+            'rules': [{
+                'id': 'first',
+                'hex': '90 ' * 32,
+                'length': 32,
+                'fixed_bytes': 32
+            }]
         }]
     }
     rulefile = tmp_path / 'rules-exec.yar'
@@ -174,5 +228,5 @@ def test_source_pack_rejects_platform_extra_that_changes_rule_id(tmp_path):
     packfile = tmp_path / 'pack.json'
     packfile.write_text(json.dumps(pack))
     with pytest.raises(production_db.ReleaseRejected,
-                       match='unsupported or noncanonical platform'):
+                       match='unsupported platform'):
         production_db.validate_source_pack(pack, rulefile, packfile=packfile)

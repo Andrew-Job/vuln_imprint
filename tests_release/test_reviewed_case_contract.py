@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from factory.yara_engine import source_from_packs
+from factory.signature_identity import new_record_id, record_sha256
 from tools import production_db
 
 CVE = "CVE-2025-12345"
@@ -22,25 +23,38 @@ def make_reviewed_case(tmp_path, monkeypatch):
     specimens.mkdir(parents=True)
     pack = {
         "schema_version":
-            1,
+            3,
         "cve":
             CVE,
-        "status":
-            "CVE_SPECIFIC_VALIDATED",
-        "source_type":
-            "factory",
-        "platform": {
-            "os": "linux",
-            "format": "ELF",
-            "arch": "x86-64",
-            "bits": 64,
-            "abi": "sysv",
-        },
-        "rules": [{
-            "id": f"{CVE}-0",
-            "hex": HEX_PATTERN,
-            "length": 32,
-            "fixed_bytes": 32
+        "records": [{
+            "record_id":
+                new_record_id(CVE),
+            "channel":
+                "production",
+            "source_type":
+                "factory",
+            "supported_profiles": [{
+                "compiler_family": family,
+                "compiler_major": major,
+                "optimization": opt
+            }
+                                   for family, majors in (("gcc", (11, 12)),
+                                                          ("clang", (14, 15)))
+                                   for major in majors
+                                   for opt in ("-O2", "-O3")],
+            "platform": {
+                "os": "linux",
+                "format": "ELF",
+                "arch": "x86-64",
+                "bits": 64,
+                "abi": "sysv",
+            },
+            "rules": [{
+                "id": f"{CVE}-0",
+                "hex": HEX_PATTERN,
+                "length": 32,
+                "fixed_bytes": 32,
+            }],
         }],
     }
     pack_path = case / "pack.json"
@@ -128,13 +142,23 @@ def make_reviewed_case(tmp_path, monkeypatch):
         add("unrelated", f"unrelated-{index:02d}")
 
     spec = {
-        "schema_version": 2,
-        "cve": CVE,
-        "quality": "CVE_SPECIFIC_VALIDATED",
-        "rules_sha256": production_db.sha256(rules_path),
-        "pack_sha256": production_db.sha256(pack_path),
+        "schema_version":
+            3,
+        "cve":
+            CVE,
+        "rules_sha256":
+            production_db.sha256(rules_path),
+        "pack_sha256":
+            production_db.sha256(pack_path),
         "training_lineages": ["training-revision-unrelated-to-holdouts"],
-        "samples": samples,
+        "samples":
+            samples,
+        "records": [{
+            "record_id": pack["records"][0]["record_id"],
+            "record_sha256": record_sha256(pack["records"][0]),
+            "training_lineages": ["training-revision-unrelated-to-holdouts"],
+            "sample_ids": [sample["id"] for sample in samples],
+        }],
     }
     evidence = case / "reviewed-evidence.json"
     evidence.write_text(json.dumps(spec))
@@ -146,16 +170,12 @@ def make_reviewed_case(tmp_path, monkeypatch):
         return {
             "matches": ([{
                 "cve": CVE,
+                "record_id": new_record_id(CVE),
                 "executable": True
             }] if positive else [])
         }
 
     monkeypatch.setattr(production_db, "native_scan", fake_native_scan)
-    monkeypatch.setattr(
-        production_db, "probe_compiler", lambda *a, **k: {
-            "binary_sha256": "b" * 64,
-            "target": "x86_64-linux-gnu"
-        })
     # Policy unit tests isolate attestation/ELF parsing; independent tests
     # exercise actual bytes and real external tools in integration CI.
     monkeypatch.setattr(production_db, "verify_static_product", lambda *_: None)
@@ -170,21 +190,20 @@ def test_reviewed_case_accepts_complete_independent_matrix(
         tmp_path, monkeypatch):
     case, spec, scanner = make_reviewed_case(tmp_path, monkeypatch)
     result = production_db.validate_case(case, scanner)
-    assert result["quality"] == "CVE_SPECIFIC_VALIDATED"
     assert result["counts"] == {
         "affected": 9,
         "fixed": 8,
         "backport": 1,
         "unrelated": 20,
     }
-    assert len(result["tested_build_profiles"]["affected"]) == 8
-    assert len(result["tested_build_profiles"]["fixed"]) == 8
+    assert len(result["records"][0]["tested_build_profiles"]["affected"]) == 8
+    assert len(result["records"][0]["tested_build_profiles"]["fixed"]) == 8
     assert (sum(
         item["independent_static_product"] for item in result["samples"]) == 1)
 
 
 @pytest.mark.parametrize("problem,expected", [
-    ("missing_fixed_lane", "missing versioned fixed lanes"),
+    ("missing_fixed_lane", "missing supported fixed lanes"),
     ("training_lineage_reused",
      "independent holdout duplicates training lineage"),
     ("bad_backport_version", "backport must fix an affected source-version"),
@@ -198,6 +217,7 @@ def test_reviewed_case_rejects_insufficient_evidence(tmp_path, monkeypatch,
     sample = spec["samples"]
     if problem == "missing_fixed_lane":
         sample[:] = [r for r in sample if r["id"] != "fixed-gcc-11--O2"]
+        spec["records"][0]["sample_ids"] = [row["id"] for row in sample]
     elif problem == "training_lineage_reused":
         spec["training_lineages"] = [sample[0]["lineage"]]
     elif problem == "bad_backport_version":
@@ -222,7 +242,13 @@ def test_fixed_binary_match_fails_evidence_gate(tmp_path, monkeypatch):
 
     def incorrect_scan(scanner, rules, target, **kwargs):
         if target.stem.startswith("fixed-"):
-            return {"matches": [{"cve": CVE, "executable": True}]}
+            return {
+                "matches": [{
+                    "cve": CVE,
+                    "record_id": new_record_id(CVE),
+                    "executable": True
+                }]
+            }
         return original_scan(scanner, rules, target, **kwargs)
 
     monkeypatch.setattr(production_db, "native_scan", incorrect_scan)
@@ -248,8 +274,78 @@ def test_admission_rejects_noncanonical_platform_metadata(
         tmp_path, monkeypatch):
     case, spec, scanner = make_reviewed_case(tmp_path, monkeypatch)
     pack = json.loads((case / "pack.json").read_text())
-    pack["platform"]["compiler"] = "gcc"
+    pack["records"][0]["platform"]["compiler"] = "gcc"
     (case / "pack.json").write_text(json.dumps(pack))
     with pytest.raises(production_db.ReleaseRejected,
-                       match="noncanonical platform"):
+                       match="unsupported platform"):
+        production_db.validate_case(case, scanner)
+
+
+def _add_second_record(case, spec):
+    pack_path = case / "pack.json"
+    pack = json.loads(pack_path.read_text())
+    second = json.loads(json.dumps(pack["records"][0]))
+    second["record_id"] = new_record_id(CVE, "independent-second-record")
+    second["supported_profiles"] = [second["supported_profiles"][0]]
+    pack["records"].append(second)
+    pack_path.write_text(json.dumps(pack))
+    rule_path = case / "rules-exec.yar"
+    rule_path.write_text(source_from_packs([pack]))
+    spec["pack_sha256"] = production_db.sha256(pack_path)
+    spec["rules_sha256"] = production_db.sha256(rule_path)
+    spec["records"].append({
+        "record_id": second["record_id"],
+        "record_sha256": record_sha256(second),
+        "training_lineages": list(spec["training_lineages"]),
+        "sample_ids": [sample["id"] for sample in spec["samples"]],
+    })
+    (case / "reviewed-evidence.json").write_text(json.dumps(spec))
+    return second
+
+
+def test_each_record_requires_independent_positive_evidence(
+        tmp_path, monkeypatch):
+    case, spec, scanner = make_reviewed_case(tmp_path, monkeypatch)
+    second = _add_second_record(case, spec)
+    with pytest.raises(production_db.ReleaseRejected,
+                       match=second["record_id"] +
+                       ".*affected sample misclassified"):
+        production_db.validate_case(case, scanner)
+
+
+def test_record_evidence_is_bound_to_record_sha256(tmp_path, monkeypatch):
+    case, spec, scanner = make_reviewed_case(tmp_path, monkeypatch)
+    spec["records"][0]["record_sha256"] = "0" * 64
+    (case / "reviewed-evidence.json").write_text(json.dumps(spec))
+    with pytest.raises(production_db.ReleaseRejected,
+                       match="record SHA-256 mismatch"):
+        production_db.validate_case(case, scanner)
+
+
+def test_supported_profiles_are_not_shared_between_sibling_records(
+        tmp_path, monkeypatch):
+    case, spec, scanner = make_reviewed_case(tmp_path, monkeypatch)
+    second = _add_second_record(case, spec)
+    # Make sibling positives independently valid, then remove its only
+    # fixed profile. The other record still covers the full matrix.
+    original = production_db.native_scan
+
+    def both_records(scanner, rules, target, **kwargs):
+        response = original(scanner, rules, target, **kwargs)
+        if response["matches"]:
+            response["matches"].append({
+                "cve": CVE,
+                "record_id": second["record_id"],
+                "executable": True
+            })
+        return response
+
+    monkeypatch.setattr(production_db, "native_scan", both_records)
+    spec["records"][1]["sample_ids"] = [
+        row["id"] for row in spec["samples"] if row["id"] != "fixed-gcc-11--O2"
+    ]
+    (case / "reviewed-evidence.json").write_text(json.dumps(spec))
+    with pytest.raises(production_db.ReleaseRejected,
+                       match=second["record_id"] +
+                       ".*missing supported fixed lanes"):
         production_db.validate_case(case, scanner)

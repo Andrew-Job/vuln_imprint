@@ -138,3 +138,49 @@ def test_cas_deduplicates_blobs_and_detects_tamper(tmp_path):
     assert store.verify(a)
     (tmp_path / 'store' / a['blob']['path']).write_bytes(b'tampered')
     assert not store.verify(b)
+
+
+def test_git_mirror_refreshes_for_new_pinned_commit(tmp_path):
+    """A cached upstream mirror must fetch newly published Git objects."""
+    from factory.git_source import get_git_source
+    import subprocess
+
+    origin = tmp_path / 'origin'
+    origin.mkdir()
+    subprocess.run(['git', 'init', '-q', str(origin)], check=True)
+    subprocess.run(['git', '-C',
+                    str(origin), 'config', 'user.name', 'Fixture'],
+                   check=True)
+    subprocess.run([
+        'git', '-C',
+        str(origin), 'config', 'user.email', 'fixture@example.invalid'
+    ],
+                   check=True)
+
+    def commit(value):
+        (origin / 'source.txt').write_text(value)
+        subprocess.run(
+            ['git', '-C', str(origin), 'add', 'source.txt'], check=True)
+        subprocess.run(
+            ['git', '-C', str(origin), 'commit', '-qm', value], check=True)
+        return subprocess.check_output(
+            ['git', '-C', str(origin), 'rev-parse', 'HEAD'], text=True).strip()
+
+    first = commit('one')
+    cache = tmp_path / 'mirrors'
+    work = tmp_path / 'work'
+    get_git_source({
+        'git': str(origin),
+        'commit': first
+    },
+                   work,
+                   mirror_cache=cache)
+    second = commit('two')
+    checkout, provenance = get_git_source({
+        'git': str(origin),
+        'commit': second
+    },
+                                          work,
+                                          mirror_cache=cache)
+    assert provenance['commit'] == second
+    assert (checkout / 'source.txt').read_text() == 'two'

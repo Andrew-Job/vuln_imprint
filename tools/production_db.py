@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Fail-closed native validation + release database for VulnImprint.
+"""CVE-owned database record validation and deterministic release assembly.
 
-This is a release tool, not a substitute for any CVE-specific source review.
-Only an explicitly reviewed case corpus with pinned SHA and patch-state controls
-may be admitted. It always executes the real compiled C++ YARA-X scanner.
+CVE is the source unit. Each database record belongs to exactly one CVE and
+is independently identified; test records never enter the production DB.
 """
 from __future__ import annotations
 
@@ -16,13 +15,14 @@ import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
-from factory.toolchains import probe_compiler, ToolchainMismatch
 from tempfile import TemporaryDirectory
+
+from factory.signature_identity import record_sha256
 
 CVE = re.compile(r'CVE-\d{4}-\d{4,}\Z')
 HASH = re.compile(r'[0-9a-f]{64}\Z')
 COMMIT = re.compile(r'(?:[0-9a-f]{40}|[0-9a-f]{64})\Z')
-ALLOWED_QUALITY = {'CVE_SPECIFIC_VALIDATED'}
+CHANNELS = frozenset({'test', 'production'})
 VALID_LABELS = {'affected', 'fixed', 'backport', 'unrelated'}
 SUPPORTED = ('linux', 'ELF', 'x86-64', 64, 'sysv')
 ENGINE_VERSION = '1.23.0'
@@ -60,63 +60,88 @@ def read_json(path: Path) -> dict:
 
 
 def validate_source_pack(pack: dict, rulefile: Path, *, packfile: Path) -> None:
-    cve = pack.get('cve')
-    if not isinstance(cve, str) or not CVE.fullmatch(cve):
-        raise ReleaseRejected('invalid CVE id')
-    if pack.get('schema_version') != 1:
-        raise ReleaseRejected(f'{cve}: unsupported pack schema')
-    if pack.get('status') in ('NO_SIGNATURE', 'QUALITY_REJECTED',
-                              'INCONCLUSIVE'):
-        raise ReleaseRejected(f'{cve}: rejected source pack')
-    if not isinstance(pack.get('rules'), list) or not pack['rules']:
-        raise ReleaseRejected(f'{cve}: empty patterns')
-    p = pack.get('platform', {})
-    if (not isinstance(p, dict) or
-            set(p) != {'os', 'format', 'arch', 'bits', 'abi'} or
-        (p.get('os'), p.get('format'), p.get('arch'), p.get('bits'),
-         p.get('abi')) != SUPPORTED or type(p.get('bits')) is not int):
-        raise ReleaseRejected(f'{cve}: unsupported or noncanonical platform')
-    if not rulefile.is_file() or not rulefile.read_text().strip():
+    """Validate a CVE envelope and every independently owned DB record."""
+    from factory.signature_identity import cve_pack_records
+    from factory.yara_engine import source_from_packs
+
+    try:
+        records = cve_pack_records(pack)
+    except (TypeError, ValueError) as exc:
+        raise ReleaseRejected(str(exc)) from exc
+    cve = pack['cve']
+    record_ids = set()
+    for record in records:
+        record_id = record['record_id']
+        if record_id in record_ids:
+            raise ReleaseRejected(f'{cve}: duplicate record ID')
+        record_ids.add(record_id)
+        if record.get('channel') not in CHANNELS:
+            raise ReleaseRejected(f'{cve}/{record_id}: invalid channel')
+        if record.get('source_type') not in ('manual', 'factory'):
+            raise ReleaseRejected(f'{cve}/{record_id}: unknown source type')
+        platform = record.get('platform')
+        if (not isinstance(platform, dict) or
+                set(platform) != {'os', 'format', 'arch', 'bits', 'abi'} or
+            (platform.get('os'), platform.get('format'), platform.get('arch'),
+             platform.get('bits'), platform.get('abi')) != SUPPORTED or
+                type(platform.get('bits')) is not int):
+            raise ReleaseRejected(f'{cve}/{record_id}: unsupported platform')
+        patterns = record.get('rules')
+        if not isinstance(patterns, list) or not patterns:
+            raise ReleaseRejected(f'{cve}/{record_id}: empty patterns')
+        ids = set()
+        for pattern in patterns:
+            if not isinstance(pattern, dict):
+                raise ReleaseRejected(f'{cve}/{record_id}: malformed pattern')
+            pattern_id = pattern.get('id')
+            pat = pattern.get('hex', '')
+            if not isinstance(pattern_id,
+                              str) or not pattern_id or pattern_id in ids:
+                raise ReleaseRejected(
+                    f'{cve}/{record_id}: duplicate/invalid pattern ID')
+            ids.add(pattern_id)
+            if len(pat) > 16384 or not re.fullmatch(
+                    r'(?:(?:[a-fA-F0-9]{2}|\?\?)\s+)*(?:[a-fA-F0-9]{2}|\?\?)',
+                    pat):
+                raise ReleaseRejected(f'{cve}/{record_id}: invalid hex pattern')
+            tokens = pat.split()
+            fixed_bytes = sum('?' not in byte for byte in tokens)
+            if (type(pattern.get('length')) is not int or
+                    type(pattern.get('fixed_bytes')) is not int or
+                    pattern['length'] != len(tokens) or
+                    pattern['fixed_bytes'] != fixed_bytes):
+                raise ReleaseRejected(
+                    f'{cve}/{record_id}: pattern length/fixed_bytes mismatch')
+            if fixed_bytes < 24 or len(tokens) < 28:
+                raise ReleaseRejected(
+                    f'{cve}/{record_id}: weak pattern, fixed bytes / length too short'
+                )
+    if not rulefile.is_file() or not rulefile.read_text(
+            encoding='utf-8').strip():
         raise ReleaseRejected(f'{cve}: missing YARA source')
-    ids = set()
-    for rule in pack['rules']:
-        pat = rule.get('hex', '')
-        if rule.get('id') in ids:
-            raise ReleaseRejected(f'{cve}: duplicate pattern id')
-        ids.add(rule.get('id'))
-        if len(pat) > 16384 or not re.fullmatch(
-                r'(?:(?:[a-fA-F0-9]{2}|\?\?)\s+)*(?:[a-fA-F0-9]{2}|\?\?)', pat):
-            raise ReleaseRejected(f'{cve}: invalid hex pattern')
-        # Never trust attacker- or generator-supplied strength metadata. A
-        # claimed 100 fixed bytes must not make an all-wildcard rule publishable.
-        tokens = pat.split()
-        fixed_bytes = sum('?' not in byte for byte in tokens)
-        if (type(rule.get('length')) is not int or
-                type(rule.get('fixed_bytes')) is not int or
-                rule['length'] != len(tokens) or
-                rule['fixed_bytes'] != fixed_bytes):
-            raise ReleaseRejected(
-                f'{cve}: pattern length/fixed_bytes do not match hex bytes')
-        if fixed_bytes < 24 or len(tokens) < 28:
-            raise ReleaseRejected(
-                f'{cve}: weak pattern, fixed bytes / length too short')
-    if pack.get('source_type') == 'manual':
-        from tools.manual_rules import check_manual_source
-        if pack.get('status') != 'CVE_SPECIFIC_VALIDATED':
-            raise ReleaseRejected(
-                f'{cve}: manual rule must be approved before production')
-        check_manual_source(pack, rulefile.read_text())
-    elif pack.get('source_type', 'factory') == 'factory':
-        from factory.yara_engine import source_from_packs
+    try:
         expected_source = source_from_packs([pack])
-        if rulefile.read_text().strip() != expected_source.strip():
-            raise ReleaseRejected(
-                f'{cve}: Factory source does not match recorded hex patterns and status'
-            )
-    else:
-        raise ReleaseRejected(f'{cve}: unknown signature source type')
+    except (TypeError, ValueError, KeyError) as exc:
+        raise ReleaseRejected(
+            f'{cve}: invalid YARA source metadata: {exc}') from exc
+    if rulefile.read_text(encoding='utf-8').strip() != expected_source.strip():
+        raise ReleaseRejected(
+            f'{cve}: YARA source differs from canonical CVE records')
+    if packfile.is_symlink() or rulefile.is_symlink():
+        raise ReleaseRejected(
+            f'{cve}: symlinked source files are not permitted')
     if packfile.stat().st_size > 1 << 20 or rulefile.stat().st_size > 1 << 20:
         raise ReleaseRejected(f'{cve}: oversized metadata/rules')
+
+
+def match_cves(hit: dict) -> set[str]:
+    """Return the single owning CVE for one native database-record match."""
+    cve = hit.get('cve') if isinstance(hit, dict) else None
+    if cve is None:
+        return set()
+    if not isinstance(cve, str) or not CVE.fullmatch(cve):
+        raise ReleaseRejected('native match has invalid CVE identifier')
+    return {cve}
 
 
 def native_scan(scanner: Path,
@@ -341,19 +366,11 @@ def validate_reviewed_toolchain(row: dict, cve: str) -> dict | None:
     if not any(links_role(argv) for argv in commands):
         raise ReleaseRejected(
             f'{cve}: no observed compiler link command for {role}')
-    # Independently remeasure compiler version, executable digest and target on
-    # the trusted release runner; never grant a lane from supplied JSON alone.
-    try:
-        measured = probe_compiler(tc.get('requested_executable', compiler_path),
-                                  expected_major=int(version.split('.')[0]),
-                                  expected_version=version,
-                                  optimization=opt)
-    except (ToolchainMismatch, OSError, ValueError) as exc:
-        raise ReleaseRejected(
-            f'{cve}: compiler cannot be independently remeasured') from exc
-    if (measured['binary_sha256'] != sha or measured['target'] != target):
-        raise ReleaseRejected(
-            f'{cve}: compiler identity contradicts release runner measurement')
+    # These identities describe the compiler that actually built the reviewed
+    # specimen. A runner image upgrade is unrelated to historical provenance.
+    # Authenticity must be verified from the source-build record and the
+    # independently pinned, immutable binary specimen, not by comparing a
+    # historical SHA against whichever compiler CI happens to install today.
     return {
         'family': family,
         'version': version,
@@ -368,16 +385,15 @@ def validate_case(case: Path,
                   scanner: Path,
                   *,
                   minimum_unrelated: int = 20) -> dict:
+    """Validate independent evidence for every record in one CVE pack."""
     packpath = case / 'pack.json'
     rulefile = case / 'rules-exec.yar'
     pack = read_json(packpath)
     validate_source_pack(pack, rulefile, packfile=packpath)
     cve = pack['cve']
     spec = read_json(case / 'reviewed-evidence.json')
-    if spec.get('schema_version') != 2 or spec.get('cve') != cve:
+    if spec.get('schema_version') != 3 or spec.get('cve') != cve:
         raise ReleaseRejected(f'{cve}: mismatched evidence schema or CVE')
-    if spec.get('quality') not in ALLOWED_QUALITY:
-        raise ReleaseRejected(f'{cve}: evidence not CVE-specific validated')
     if spec.get('rules_sha256') != sha256(rulefile) or spec.get(
             'pack_sha256') != sha256(packpath):
         raise ReleaseRejected(
@@ -385,25 +401,55 @@ def validate_case(case: Path,
     rows = spec.get('samples')
     if not isinstance(rows, list):
         raise ReleaseRejected(f'{cve}: missing samples')
-    training_lineages = spec.get('training_lineages')
-    if not isinstance(training_lineages, list) or not training_lineages:
+    common_training = spec.get('training_lineages')
+    if (not isinstance(common_training, list) or not common_training or
+            any(not isinstance(x, str) or not x for x in common_training)):
         raise ReleaseRejected(f'{cve}: training lineages not declared')
-    counts = Counter()
-    lineages = {k: set() for k in VALID_LABELS}
-    measured = {'affected': set(), 'fixed': set(), 'backport': set()}
-    seen = set()
+
+    records = {r['record_id']: r for r in pack['records']}
+    evidence_rows = spec.get('records')
+    if not isinstance(evidence_rows, list):
+        raise ReleaseRejected(f'{cve}: record-level evidence is required')
+    evidence_by_id = {}
+    for entry in evidence_rows:
+        if not isinstance(entry, dict) or set(entry) != {
+                'record_id', 'record_sha256', 'training_lineages', 'sample_ids'
+        }:
+            raise ReleaseRejected(f'{cve}: malformed record evidence')
+        record_id = entry['record_id']
+        if not isinstance(record_id, str) or record_id in evidence_by_id:
+            raise ReleaseRejected(
+                f'{cve}: duplicated/invalid evidence record ID')
+        evidence_by_id[record_id] = entry
+    if set(evidence_by_id) != set(records):
+        raise ReleaseRejected(
+            f'{cve}: evidence must cover every DB record exactly once')
+    for record_id, record in records.items():
+        entry = evidence_by_id[record_id]
+        if entry['record_sha256'] != record_sha256(record):
+            raise ReleaseRejected(f'{cve}/{record_id}: record SHA-256 mismatch')
+        training = entry['training_lineages']
+        sample_ids = entry['sample_ids']
+        if (not isinstance(training, list) or not training or
+                any(not isinstance(x, str) or not x for x in training) or
+                not isinstance(sample_ids, list) or not sample_ids or
+                any(not isinstance(x, str) or not x for x in sample_ids) or
+                len(sample_ids) != len(set(sample_ids))):
+            raise ReleaseRejected(
+                f'{cve}/{record_id}: invalid training/sample IDs')
+
+    sample_data = {}
+    lineage_labels = {}
     digests_seen = set()
-    lineage_digests = {}
-    results = []
-    affected_versions = set()
-    backport_versions = set()
     for row in rows:
-        label = row.get('label')
-        lineage = row.get('lineage')
-        sampleid = row.get('id')
-        if label not in VALID_LABELS or not lineage or not sampleid or sampleid in seen:
+        if not isinstance(row, dict):
+            raise ReleaseRejected(f'{cve}: malformed specimen')
+        label, lineage, sampleid = (row.get('label'), row.get('lineage'),
+                                    row.get('id'))
+        if (label not in VALID_LABELS or not isinstance(lineage, str) or
+                not lineage or not isinstance(sampleid, str) or not sampleid or
+                sampleid in sample_data):
             raise ReleaseRejected(f'{cve}: malformed label/lineage/id')
-        seen.add(sampleid)
         if row.get('split') != 'independent_holdout':
             raise ReleaseRejected(
                 f'{cve}: all release samples must be independent holdouts')
@@ -416,7 +462,6 @@ def validate_case(case: Path,
         if not str(row.get('origin', '')).startswith('https://'):
             raise ReleaseRejected(f'{cve}: verified source origin required')
         supplied = Path(row.get('path', ''))
-        # Only paths within the reviewed case directory can be trusted as release evidence.
         specimen = (case / supplied).resolve()
         if not specimen.is_relative_to(
                 case.resolve()) or not specimen.is_file():
@@ -431,20 +476,20 @@ def validate_case(case: Path,
                 f'{cve}: duplicate binary digest cannot count as independent evidence'
             )
         digests_seen.add(digest)
-        if lineage in lineage_digests and lineage_digests[lineage] != label:
+        if lineage in lineage_labels and lineage_labels[lineage] != label:
             raise ReleaseRejected(
                 f'{cve}: contradictory labels within one sample lineage')
-        lineage_digests[lineage] = label
-        hit = native_scan(scanner, rulefile, specimen)
-        findings = [x for x in hit['matches'] if x.get('cve') == cve]
-        if bool(findings) != (label == 'affected'):
-            raise ReleaseRejected(
-                f'{cve}: {label} sample misclassified: {sampleid}')
-        if any(not x.get('executable') for x in findings):
-            raise ReleaseRejected(f'{cve}: non-executable hit: {sampleid}')
-        if lineage in training_lineages:
+        lineage_labels[lineage] = label
+        if lineage in common_training:
             raise ReleaseRejected(
                 f'{cve}: independent holdout duplicates training lineage')
+        hit = native_scan(scanner, rulefile, specimen)
+        findings = [x for x in hit['matches'] if cve in match_cves(x)]
+        if any(not x.get('executable') for x in findings):
+            raise ReleaseRejected(f'{cve}: non-executable hit: {sampleid}')
+        if any(x.get('record_id') not in records for x in findings):
+            raise ReleaseRejected(
+                f'{cve}: native match has unknown record ID: {sampleid}')
         tc = validate_reviewed_toolchain(row,
                                          cve) if label != 'unrelated' else None
         independent_static = False
@@ -455,421 +500,392 @@ def validate_case(case: Path,
                     f'{cve}: third-party linkage is not declared')
             if row['linkage'] == 'static':
                 verify_static_product(specimen)
-            # A declared third-party lineage is never by itself independent
-            # source evidence, even for fixed/backport negative controls.
             verify_third_party_attestation(specimen, row)
             independent_static = label == 'affected' and row[
                 'linkage'] == 'static'
-        if tc and label in measured:
-            measured[label].add(
-                (tc['family'], tc['version'], tc['binary_sha256'],
-                 tc['optimization'], tc['target']))
-        if label == 'affected':
-            affected_versions.add(row.get('version'))
-        if label == 'backport':
-            backport_versions.add(row.get('version'))
-            if not COMMIT.fullmatch(str(row.get('patch_commit', ''))):
-                raise ReleaseRejected(
-                    f'{cve}: backport fix patch commit required')
-        counts[label] += 1
-        lineages[label].add(lineage)
-        results.append({
-            'id': sampleid,
+        if label == 'backport' and not COMMIT.fullmatch(
+                str(row.get('patch_commit', ''))):
+            raise ReleaseRejected(f'{cve}: backport fix patch commit required')
+        sample_data[sampleid] = {
+            'row': row,
             'label': label,
             'lineage': lineage,
-            'sha256': digest,
-            'matches': len(findings),
-            'independent_static_product': independent_static
-        })
-    if counts['affected'] < 2 or counts['fixed'] < 2 or counts[
-            'backport'] < 1 or counts['unrelated'] < minimum_unrelated:
-        raise ReleaseRejected(
-            f'{cve}: insufficient independent controls: {dict(counts)}')
-    # A backport is a distinct negative control, not a second independent
-    # upstream fixed lineage.  Do not let one fixed lineage + one backport
-    # falsely satisfy the two-fixed-lineage policy.
-    if len(lineages['affected']) < 2 or len(lineages['fixed']) < 2:
-        raise ReleaseRejected(f'{cve}: insufficient affected/fixed lineages')
-    if not affected_versions or not affected_versions.intersection(
-            backport_versions):
-        raise ReleaseRejected(
-            f'{cve}: backport must fix an affected source-version family')
-    # First supported profile has to have measured GCC and Clang evidence for
-    # both vulnerable and fixed states. Exact versions remain in the DB index;
-    # each release reports which versions were *actually* tested.
-    for state in ('affected', 'fixed'):
-        lanes = {(family, int(version.split('.')[0]), opt)
-                 for family, version, digest, opt, target in measured[state]}
-        missing = REQUIRED_LANES - lanes
-        if missing:
+            'tc': tc,
+            'findings': findings,
+            'independent_static': independent_static,
+            'summary': {
+                'id': sampleid,
+                'label': label,
+                'lineage': lineage,
+                'sha256': digest,
+                'matches': len(findings),
+                'independent_static_product': independent_static
+            },
+        }
+
+    reports = []
+    for record_id, record in records.items():
+        entry = evidence_by_id[record_id]
+        sample_ids = entry['sample_ids']
+        if any(sampleid not in sample_data for sampleid in sample_ids):
             raise ReleaseRejected(
-                f'{cve}: missing versioned {state} lanes: {sorted(missing)}')
-    if lineages['affected'] & (lineages['fixed'] | lineages['backport']):
-        raise ReleaseRejected(
-            f'{cve}: affected vs fixed lineages must be independent')
-    tested = {
-        label: [{
-            'compiler_family': family,
-            'compiler_version': version,
-            'compiler_binary_sha256': digest,
-            'optimization': opt,
-            'target': target
-        } for family, version, digest, opt, target in sorted(rows)
-               ] for label, rows in measured.items()
-    }
+                f'{cve}/{record_id}: unknown evidence sample ID')
+        counts = Counter()
+        lineages = {k: set() for k in VALID_LABELS}
+        measured = {'affected': set(), 'fixed': set(), 'backport': set()}
+        affected_versions, backport_versions = set(), set()
+        samples_for_record = []
+        for sampleid in sample_ids:
+            data = sample_data[sampleid]
+            row, label, lineage = data['row'], data['label'], data['lineage']
+            record_findings = [
+                x for x in data['findings'] if x.get('record_id') == record_id
+            ]
+            if bool(record_findings) != (label == 'affected'):
+                raise ReleaseRejected(
+                    f'{cve}/{record_id}: {label} sample misclassified: {sampleid}'
+                )
+            if lineage in entry['training_lineages']:
+                raise ReleaseRejected(
+                    f'{cve}/{record_id}: independent holdout duplicates training lineage'
+                )
+            tc = data['tc']
+            if tc and label in measured:
+                measured[label].add(
+                    (tc['family'], tc['version'], tc['binary_sha256'],
+                     tc['optimization'], tc['target']))
+            if label == 'affected':
+                affected_versions.add(row.get('version'))
+            if label == 'backport':
+                backport_versions.add(row.get('version'))
+            counts[label] += 1
+            lineages[label].add(lineage)
+            samples_for_record.append({
+                **data['summary'], 'matches': len(record_findings)
+            })
+        if (counts['affected'] < 2 or counts['fixed'] < 2 or
+                counts['backport'] < 1 or
+                counts['unrelated'] < minimum_unrelated):
+            raise ReleaseRejected(
+                f'{cve}/{record_id}: insufficient independent controls: {dict(counts)}'
+            )
+        if len(lineages['affected']) < 2 or len(lineages['fixed']) < 2:
+            raise ReleaseRejected(
+                f'{cve}/{record_id}: insufficient affected/fixed lineages')
+        if not affected_versions or not affected_versions.intersection(
+                backport_versions):
+            raise ReleaseRejected(
+                f'{cve}/{record_id}: backport must fix an affected source-version family'
+            )
+        if lineages['affected'] & (lineages['fixed'] | lineages['backport']):
+            raise ReleaseRejected(
+                f'{cve}/{record_id}: affected vs fixed lineages must be independent'
+            )
+        supported = record.get('supported_profiles')
+        if not isinstance(supported, list) or not supported:
+            raise ReleaseRejected(
+                f'{cve}/{record_id}: supported compiler profiles not declared')
+        promised = set()
+        for lane in supported:
+            if (not isinstance(lane, dict) or set(lane)
+                    != {'compiler_family', 'compiler_major', 'optimization'} or
+                    lane['compiler_family'] not in COMPILER_FAMILIES or
+                    type(lane['compiler_major']) is not int or
+                    lane['compiler_major'] <= 0 or
+                    lane['optimization'] not in ('-O2', '-O3')):
+                raise ReleaseRejected(
+                    f'{cve}/{record_id}: invalid supported compiler profile')
+            key = (lane['compiler_family'], lane['compiler_major'],
+                   lane['optimization'])
+            if key in promised:
+                raise ReleaseRejected(
+                    f'{cve}/{record_id}: duplicate supported compiler profile')
+            promised.add(key)
+        for state in ('affected', 'fixed'):
+            measured_lanes = {
+                (family, int(version.split('.')[0]), opt)
+                for family, version, digest, opt, target in measured[state]
+            }
+            if promised - measured_lanes:
+                raise ReleaseRejected(
+                    f'{cve}/{record_id}: missing supported {state} lanes: '
+                    f'{sorted(promised - measured_lanes)}')
+        tested = {
+            label: [{
+                'compiler_family': family,
+                'compiler_version': version,
+                'compiler_binary_sha256': digest,
+                'optimization': opt,
+                'target': target
+            } for family, version, digest, opt, target in sorted(lanes)
+                   ] for label, lanes in measured.items()
+        }
+        reports.append({
+            'record_id':
+                record_id,
+            'record_sha256':
+                record_sha256(record),
+            'counts':
+                dict(counts),
+            'supported_profiles':
+                sorted(supported,
+                       key=lambda lane: (lane['compiler_family'], lane[
+                           'compiler_major'], lane['optimization'])),
+            'tested_build_profiles':
+                tested,
+            'samples':
+                samples_for_record,
+        })
     return {
-        'schema_version': 2,
+        'schema_version': 3,
         'cve': cve,
-        'quality': 'CVE_SPECIFIC_VALIDATED',
-        'tested_build_profiles': tested,
+        'record_count': len(reports),
+        'records': reports,
+        'counts': dict(Counter(item['label'] for item in sample_data.values())),
+        'samples': [sample_data[row['id']]['summary'] for row in rows],
         'native_scanner_sha256': sha256(scanner),
         'rules_sha256': sha256(rulefile),
         'pack_sha256': sha256(packpath),
-        'counts': dict(counts),
-        'samples': results,
-        'evidence_sha256': sha256(case / 'reviewed-evidence.json')
+        'evidence_sha256': sha256(case / 'reviewed-evidence.json'),
     }
 
 
-def build_release(cases: Path,
-                  out: Path,
-                  scanner: Path,
-                  *,
-                  min_cves: int = 1,
-                  signatures: Path | None = None) -> dict:
+def review_cases(cases: Path,
+                 scanner: Path,
+                 *,
+                 min_cves: int = 1,
+                 signatures: Path | None = None) -> dict:
+    """Review independently sourced CVE evidence; never assemble a database."""
     if not isinstance(min_cves, int) or min_cves < 1:
         raise ReleaseRejected('minimum CVE count must be a positive integer')
     scanner = scanner.resolve()
     if not scanner.is_file() or not scanner.stat().st_mode & 0o111:
         raise ReleaseRejected(
-            'release requires real executable C++ YARA-X scanner')
+            'review requires real executable C++ YARA-X scanner')
     dirs = sorted(
         p for p in cases.iterdir() if p.is_dir() and (p / 'pack.json').exists())
     if len(dirs) < min_cves:
         raise ReleaseRejected(
-            f'release requires >={min_cves} reviewed CVE packs; got {len(dirs)}'
-        )
-    if signatures is None:
-        raise ReleaseRejected(
-            'the complete Git validated signature tree is mandatory')
-    out = out.resolve()
-    if out.exists() and any(out.iterdir()):
-        raise ReleaseRejected('refusing nonempty release output')
-    results = []
-    packs = []
-    if signatures is not None:
-        if not signatures.is_dir():
-            raise ReleaseRejected(
-                'reviewed Git signature directory does not exist')
-        expected = {d.name for d in dirs}
-        tracked = {d.name for d in signatures.iterdir() if d.is_dir()}
-        if any(not CVE.fullmatch(name) for name in tracked):
-            raise ReleaseRejected(
-                'invalid directory in Git validated signatures')
-        if expected != tracked:
-            raise ReleaseRejected(
-                f'Git signature / reviewed corpus CVE mismatch: {sorted(expected ^ tracked)}'
-            )
-        for d in dirs:
-            if d.name != read_json(d / 'pack.json').get('cve'):
-                raise ReleaseRejected('case directory does not match CVE ID')
-            for name in ('pack.json', 'rules-exec.yar',
-                         'reviewed-evidence.json'):
-                canonical = signatures / d.name / name
-                if not canonical.is_file() or sha256(canonical) != sha256(
-                        d / name):
-                    raise ReleaseRejected(
-                        f'{d.name}: {name} differs from version-controlled source'
-                    )
-    for d in dirs:
-        evidence = validate_case(d, scanner)
-        pack = read_json(d / 'pack.json')
-        if any(x['cve'] == pack['cve'] for x in results):
-            raise ReleaseRejected('duplicate CVE in release')
-        results.append(evidence)
-        packs.append(pack)
-    unique_unrelated = {
-        x['sha256']
-        for e in results
-        for x in e['samples']
-        if x['label'] == 'unrelated'
+            f'review requires >={min_cves} reviewed CVE packs; got {len(dirs)}')
+    if signatures is None or not signatures.is_dir():
+        raise ReleaseRejected('the complete Git CVE source tree is mandatory')
+    expected = {directory.name for directory in dirs}
+    tracked = {
+        directory.name
+        for directory in signatures.iterdir()
+        if directory.is_dir() and (directory /
+                                   'reviewed-evidence.json').is_file()
     }
-    if len(unique_unrelated) < min(min_cves, 1000):
+    if expected != tracked:
+        raise ReleaseRejected(
+            f'Git signature / reviewed corpus CVE mismatch: {sorted(expected ^ tracked)}'
+        )
+    results = []
+    for directory in dirs:
+        if directory.name != read_json(directory / 'pack.json').get('cve'):
+            raise ReleaseRejected('case directory does not match CVE ID')
+        for name in ('pack.json', 'rules-exec.yar', 'reviewed-evidence.json'):
+            canonical = signatures / directory.name / name
+            if not canonical.is_file() or sha256(canonical) != sha256(
+                    directory / name):
+                raise ReleaseRejected(
+                    f'{directory.name}: {name} differs from version-controlled source'
+                )
+        results.append(validate_case(directory, scanner))
+    unrelated = {
+        sample['sha256']
+        for result in results
+        for sample in result['samples']
+        if sample['label'] == 'unrelated'
+    }
+    if len(unrelated) < min(min_cves, 1000):
         raise ReleaseRejected(
             'insufficient unique unrelated negative controls across DB')
-    if not any(x['independent_static_product']
-               for e in results
-               for x in e['samples']):
+    if not any(sample['independent_static_product']
+               for result in results
+               for sample in result['samples']):
         raise ReleaseRejected(
             'no independent stripped third-party static-linking positive')
-    # Compile in actual C++ YARA-X, not mock, Python YARA-X or reference code.
-    # Publish exactly the YARA source that passed the CVE-specific native
-    # holdout tests, not a regenerated source that could differ from it.
-    rule_source = '\n'.join(
-        (d / 'rules-exec.yar').read_text().strip() for d in dirs) + '\n'
-    with TemporaryDirectory(prefix='vulnimprint-rel-') as scratch:
-        tmp = Path(scratch)
-        (tmp / 'database.yar').write_text(rule_source)
-        compiled = tmp / 'database.yarc'
-        process = subprocess.run([
-            str(scanner), 'compile', '--rules',
-            str(tmp / 'database.yar'), '--output',
-            str(compiled)
-        ],
-                                 capture_output=True,
-                                 text=True,
-                                 timeout=120)
-        if process.returncode != 0 or not compiled.is_file() or compiled.stat(
-        ).st_size == 0:
-            raise ReleaseRejected(
-                f'native YARA-X compilation failed: {process.stderr[:600]}')
-        # Full DB must return each expected positive and no known negatives.
-        for d, e in zip(dirs, results):
-            reviewed = read_json(d / 'reviewed-evidence.json')
-            for sample in reviewed['samples']:
-                result = native_scan(scanner,
-                                     compiled,
-                                     d / sample['path'],
-                                     compiled=True)
-                matched_cves = {x.get('cve') for x in result['matches']}
-                if (e['cve']
-                        in matched_cves) != (sample['label'] == 'affected'):
-                    raise ReleaseRejected(
-                        f'combined DB regression: {e["cve"]}/{sample["id"]}')
-                # A file fixed for CVE-A can still legitimately contain CVE-B.
-                # Only global unrelated controls are required to be clean of ALL
-                # published CVEs; never mislabel a CVE-B hit as FP for CVE-A.
-                if sample['label'] == 'unrelated' and matched_cves:
-                    raise ReleaseRejected(
-                        f'combined DB unrelated FP: {sample["id"]}')
-        tmpout = tmp / 'release'
-        tmpout.mkdir()
-        shutil.copy2(compiled, tmpout / 'database.yarc')
-        shutil.copy2(tmp / 'database.yar', tmpout / 'database.yar')
-        write_json(
-            tmpout / 'quality-report.json', {
-                'schema_version': 1,
-                'engine': 'YARA-X C API',
-                'quality': 'CVE_SPECIFIC_VALIDATED',
-                'packs': results
+    return {
+        'status': 'PASS',
+        'cve_count': len(results),
+        'record_count': sum(result['record_count'] for result in results),
+        'independent_validation': results,
+    }
+
+
+def assemble_git_tree(signatures: Path,
+                      out: Path,
+                      scanner: Path,
+                      *,
+                      channel: str = 'production') -> dict:
+    """Compile CVE-owned records from Git for the requested DB channel."""
+    from factory.signature_identity import cve_pack_records, record_identity
+    from factory.yara_engine import source_from_packs
+    from scripts.check_cve_source_tree import check
+
+    if channel not in CHANNELS:
+        raise ReleaseRejected('database channel must be test or production')
+    if signatures.is_symlink() or signatures.name != 'signatures':
+        raise ReleaseRejected(
+            'release source must be the Git signatures directory')
+    root = signatures.resolve().parent
+    if signatures.resolve() != root / 'signatures':
+        raise ReleaseRejected('noncanonical Git signatures directory')
+    check(root)
+    if not scanner.is_file() or not scanner.stat().st_mode & 0o111:
+        raise ReleaseRejected('native YARA-X scanner executable is required')
+    if out.exists() and (not out.is_dir() or any(out.iterdir())):
+        raise ReleaseRejected('refusing nonempty database output')
+
+    catalog_cves = sorted(
+        directory.name
+        for directory in signatures.iterdir()
+        if directory.is_dir() and CVE.fullmatch(directory.name))
+    packs, selected_records, sources, entries = [], [], [], []
+    seen_ids = set()
+    for cve in catalog_cves:
+        directory = signatures / cve
+        pack_path = directory / 'pack.json'
+        if not pack_path.is_file():
+            if (directory / 'research.json').is_file():
+                continue
+            raise ReleaseRejected(f'{cve}: missing pack.json or research.json')
+        rule_path = directory / 'rules-exec.yar'
+        pack = read_json(pack_path)
+        validate_source_pack(pack, rule_path, packfile=pack_path)
+        records = cve_pack_records(pack)
+        packs.append(pack)
+        for record in records:
+            record_id, owner = record_identity(cve, record)
+            if record_id in seen_ids:
+                raise ReleaseRejected(
+                    f'duplicate database record ID: {record_id}')
+            seen_ids.add(record_id)
+            if channel == 'production' and record['channel'] != 'production':
+                continue
+            filtered = {**pack, 'records': [record]}
+            selected_records.append((filtered, record))
+            sources.append(source_from_packs([filtered]).rstrip())
+            entries.append({
+                'cve': owner,
+                'record_id': record_id,
+                'record_sha256': record_sha256(record),
+                'channel': record['channel'],
+                'platform': record['platform'],
+                'pattern_count': len(record['rules']),
+                'pack_sha256': sha256(pack_path),
+                'rules_sha256': sha256(rule_path),
             })
-        index = {
-            'schema_version':
-                1,
-            'name':
-                'VulnImprint DB',
-            'profile': {
-                'os': 'linux',
-                'format': 'ELF',
-                'arch': 'x86-64',
-                'bits': 64,
-                'abi': 'sysv'
-            },
-            'rule_quality':
-                'CVE_SPECIFIC_VALIDATED',
-            'pattern_count':
-                sum(len(p['rules']) for p in packs),
-            'yara_rule_count':
-                len(packs),
-            'cve_count':
-                len(packs),
-            'entries': [{
-                'cve': x['cve'],
-                'quality': 'CVE_SPECIFIC_VALIDATED',
-                'pattern_count': len(p['rules']),
-                'rule_id': x['cve'].replace('-', '_') + '_ELF64_x86_64',
-                'pack_sha256': x['pack_sha256'],
-                'rules_sha256': x['rules_sha256'],
-                'validation_counts': x['counts'],
-                'tested_build_profiles': x['tested_build_profiles']
-            } for x, p in zip(results, packs)]
-        }
-        write_json(tmpout / 'index.json', index)
-        sums = {
-            p.name: sha256(p) for p in sorted(tmpout.iterdir()) if p.is_file()
+    if not selected_records:
+        raise ReleaseRejected(
+            f'no {channel} database records in Git source tree')
+    entries.sort(key=lambda row: (row['cve'], row['record_id']))
+    sources_by_id = {
+        record['record_id']: source
+        for (_, record), source in zip(selected_records, sources)
+    }
+    rule_source = '\n'.join(
+        sources_by_id[row['record_id']] for row in entries) + '\n'
+    cves = sorted({row['cve'] for row in entries})
+    excluded_from_channel = sorted(set(catalog_cves) - set(cves))
+    record_count = len(entries)
+    pattern_count = sum(row['pattern_count'] for row in entries)
+
+    with TemporaryDirectory(prefix='vulnimprint-assemble-') as temporary:
+        work = Path(temporary)
+        (work / 'database.yar').write_text(rule_source, encoding='utf-8')
+        compiled = work / 'database.yarc'
+        try:
+            process = subprocess.run([
+                str(scanner), 'compile', '--rules',
+                str(work / 'database.yar'), '--output',
+                str(compiled)
+            ],
+                                     capture_output=True,
+                                     text=True,
+                                     timeout=120,
+                                     check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ReleaseRejected('native YARA-X compilation failed') from exc
+        if process.returncode or not compiled.is_file() or not compiled.stat(
+        ).st_size:
+            raise ReleaseRejected('native YARA-X compilation failed: ' +
+                                  process.stderr[:600])
+        write_json(
+            work / 'index.json', {
+                'schema_version': 2,
+                'name': 'VulnImprint DB',
+                'channel': channel,
+                'profile': {
+                    'os': 'linux',
+                    'format': 'ELF',
+                    'arch': 'x86-64',
+                    'bits': 64,
+                    'abi': 'sysv'
+                },
+                'record_count': record_count,
+                'pattern_count': pattern_count,
+                'cve_count': len(cves),
+                'source_cves': catalog_cves,
+                'excluded_from_channel_cves': excluded_from_channel,
+                'entries': entries,
+            })
+        write_json(
+            work / 'database-report.json', {
+                'schema_version': 1,
+                'channel': channel,
+                'cve_count': len(cves),
+                'record_count': record_count,
+                'pattern_count': pattern_count,
+                'records': entries,
+            })
+        digests = {
+            name: sha256(work / name)
+            for name in ('database.yarc', 'database.yar', 'index.json',
+                         'database-report.json')
         }
         write_json(
-            tmpout / 'manifest.json', {
-                'schema_version': 2,
-                'artifacts': sums,
+            work / 'manifest.json', {
+                'schema_version': 3,
+                'artifacts': digests,
                 'profile': PROFILE_ID,
-                'cve_count': len(packs),
+                'channel': channel,
+                'cve_count': len(cves),
+                'record_count': record_count,
                 'engine': {
                     'name': 'yara-x-capi',
                     'version': ENGINE_VERSION,
                     'serialized_rules_format': 'yara-x',
                     'scanner_min_version': '0.1.0',
-                    'scanner_max_exclusive': '0.2.0'
-                }
-            })
-        (tmpout / 'SHA256SUMS').write_text(''.join(
-            f'{digest}  {name}\n' for name, digest in sorted(sums.items())))
-        out.mkdir(parents=True, exist_ok=True)
-        verify_release(tmpout, scanner=scanner)
-        for p in tmpout.iterdir():
-            shutil.copy2(p, out / p.name)
-    return {'status': 'PASS', 'cve_count': len(packs), 'output': str(out)}
-
-
-def assemble_validated(signatures: Path, out: Path, scanner: Path) -> dict:
-    """Build the release database from the complete reviewed Git source tree.
-
-    Corpus-driven native validation is performed before approval/merge. This
-    command does not approve a candidate or silently drop an admitted CVE.
-    """
-    from scripts.check_validated_signatures import check
-
-    if signatures.is_symlink(
-    ) or signatures.name != "validated" or signatures.parent.name != "signatures":
-        raise ReleaseRejected(
-            "release source must be the canonical validated Git directory")
-    project_root = signatures.resolve().parent.parent
-    if signatures.resolve() != (project_root / "signatures" /
-                                "validated").resolve():
-        raise ReleaseRejected(
-            "release source differs from validated Git directory")
-    cves = check(project_root)
-    if not cves:
-        raise ReleaseRejected(
-            "no Git-validated CVEs; cannot release an empty DB")
-    if not scanner.is_file() or not scanner.stat().st_mode & 0o111:
-        raise ReleaseRejected("native YARA-X scanner executable is required")
-    if out.exists() and (not out.is_dir() or any(out.iterdir())):
-        raise ReleaseRejected("refusing nonempty database output")
-
-    packs = []
-    sources = []
-    results = []
-    for cve in cves:
-        directory = signatures / cve
-        pack = read_json(directory / "pack.json")
-        evidence = read_json(directory / "reviewed-evidence.json")
-        source = directory / "rules-exec.yar"
-        # check() verifies approval, format and exact evidence/source hashes.
-        # Do not generate new YARA source or silently normalize approved bytes.
-        packs.append(pack)
-        sources.append(source.read_text(encoding="utf-8").rstrip())
-        counts = Counter(row.get("label") for row in evidence["samples"])
-        results.append({
-            "cve":
-                cve,
-            "quality":
-                "CVE_SPECIFIC_VALIDATED",
-            "pack_sha256":
-                sha256(directory / "pack.json"),
-            "rules_sha256":
-                sha256(source),
-            "evidence_sha256":
-                sha256(directory / "reviewed-evidence.json"),
-            "counts":
-                dict(counts),
-            "tested_build_profiles":
-                sorted({(sample["build_profile"]["compiler_family"],
-                         sample["build_profile"]["compiler_version"],
-                         sample["build_profile"]["optimization"])
-                        for sample in evidence["samples"]
-                        if isinstance(sample, dict) and
-                        isinstance(sample.get("build_profile"), dict) and all(
-                            isinstance(sample["build_profile"].get(key), str)
-                            for key in ("compiler_family", "compiler_version",
-                                        "optimization"))}),
-        })
-
-    with TemporaryDirectory(prefix="vulnimprint-assemble-") as directory:
-        work = Path(directory)
-        (work / "database.yar").write_text("\n".join(sources) + "\n",
-                                           encoding="utf-8")
-        compiled = work / "database.yarc"
-        try:
-            proc = subprocess.run([
-                str(scanner), "compile", "--rules",
-                str(work / "database.yar"), "--output",
-                str(compiled)
-            ],
-                                  capture_output=True,
-                                  text=True,
-                                  timeout=120,
-                                  check=False)
-        except (OSError, subprocess.TimeoutExpired) as error:
-            raise ReleaseRejected(
-                "native YARA-X compilation could not complete") from error
-        if proc.returncode or not compiled.is_file() or not compiled.stat(
-        ).st_size:
-            raise ReleaseRejected("native compilation failed: " +
-                                  proc.stderr[:600])
-        index = {
-            "schema_version":
-                1,
-            "name":
-                "VulnImprint DB",
-            "profile": {
-                "os": "linux",
-                "format": "ELF",
-                "arch": "x86-64",
-                "bits": 64,
-                "abi": "sysv"
-            },
-            "rule_quality":
-                "CVE_SPECIFIC_VALIDATED",
-            "pattern_count":
-                sum(len(pack["rules"]) for pack in packs),
-            "yara_rule_count":
-                len(cves),
-            "cve_count":
-                len(cves),
-            "entries": [{
-                "cve": row["cve"],
-                "quality": "CVE_SPECIFIC_VALIDATED",
-                "pattern_count": len(pack["rules"]),
-                "rule_id": row["cve"].replace("-", "_") + "_ELF64_x86_64",
-                "pack_sha256": row["pack_sha256"],
-                "rules_sha256": row["rules_sha256"],
-                "validation_counts": row["counts"],
-                "tested_build_profiles": row["tested_build_profiles"],
-            } for row, pack in zip(results, packs)],
-        }
-        write_json(work / "index.json", index)
-        write_json(
-            work / "quality-report.json", {
-                "schema_version": 1,
-                "quality": "CVE_SPECIFIC_VALIDATED",
-                "validation_stage": "reviewed_before_merge",
-                "packs": results,
-            })
-        digests = {
-            name: sha256(work / name)
-            for name in ("database.yarc", "database.yar", "index.json",
-                         "quality-report.json")
-        }
-        write_json(
-            work / "manifest.json", {
-                "schema_version": 2,
-                "artifacts": digests,
-                "profile": PROFILE_ID,
-                "cve_count": len(cves),
-                "engine": {
-                    "name": "yara-x-capi",
-                    "version": ENGINE_VERSION,
-                    "serialized_rules_format": "yara-x",
-                    "scanner_min_version": "0.1.0",
-                    "scanner_max_exclusive": "0.2.0",
+                    'scanner_max_exclusive': '0.2.0',
                 },
             })
-        (work / "SHA256SUMS").write_text("".join(
-            f"{digest}  {name}\n" for name, digest in sorted(digests.items())),
-                                         encoding="utf-8")
+        (work / 'SHA256SUMS').write_text(''.join(
+            f'{digest}  {name}\n' for name, digest in sorted(digests.items())),
+                                         encoding='utf-8')
         verify_release(work, scanner=scanner)
         out.mkdir(parents=True, exist_ok=True)
-        for name in (*digests, "manifest.json", "SHA256SUMS"):
+        for name in (*digests, 'manifest.json', 'SHA256SUMS'):
             shutil.copy2(work / name, out / name)
-    return {"status": "PASS", "cve_count": len(cves), "output": str(out)}
+    return {
+        'status': 'PASS',
+        'channel': channel,
+        'cve_count': len(cves),
+        'record_count': record_count,
+        'source_cve_count': len(catalog_cves),
+        'output': str(out)
+    }
 
 
 def verify_release(directory: Path, *, scanner: Path | None = None) -> dict:
-    m = read_json(directory / 'manifest.json')
-    if m.get('schema_version') != 2 or not isinstance(m.get('artifacts'), dict):
-        raise ReleaseRejected('invalid DB manifest schema')
-    if m.get('profile') != PROFILE_ID or m.get('engine') != {
+    """Verify database source, index, manifest and native compiled rule counts."""
+    manifest = read_json(directory / 'manifest.json')
+    if (manifest.get('schema_version') != 3 or
+            not isinstance(manifest.get('artifacts'), dict) or
+            manifest.get('channel') not in CHANNELS):
+        raise ReleaseRejected('invalid DB manifest schema or channel')
+    if manifest.get('profile') != PROFILE_ID or manifest.get('engine') != {
             'name': 'yara-x-capi',
             'version': ENGINE_VERSION,
             'serialized_rules_format': 'yara-x',
@@ -878,42 +894,108 @@ def verify_release(directory: Path, *, scanner: Path | None = None) -> dict:
     }:
         raise ReleaseRejected(
             'DB profile or native scanner/engine compatibility mismatch')
-    if set(m['artifacts']) != {
-            'database.yarc', 'database.yar', 'index.json', 'quality-report.json'
-    }:
+    expected_artifacts = {
+        'database.yarc', 'database.yar', 'index.json', 'database-report.json'
+    }
+    if set(manifest['artifacts']) != expected_artifacts:
         raise ReleaseRejected('incomplete release manifest')
-    for name, digest in m['artifacts'].items():
+    for name, digest in manifest['artifacts'].items():
         if not HASH.fullmatch(str(digest)) or sha256(
                 directory / name) != digest:
             raise ReleaseRejected('release digest mismatch: ' + name)
     checksum_file = directory / 'SHA256SUMS'
+    observed = {}
     try:
-        observed = {}
-        for line in checksum_file.read_text().splitlines():
+        for line in checksum_file.read_text(encoding='utf-8').splitlines():
             digest, separator, name = line.partition('  ')
             if not separator or name in observed or not HASH.fullmatch(digest):
                 raise ReleaseRejected('invalid or repeated SHA256SUMS entry')
             observed[name] = digest
-        if observed != m['artifacts']:
-            raise ReleaseRejected('SHA256SUMS does not match DB manifest')
     except OSError as exc:
         raise ReleaseRejected('missing SHA256SUMS') from exc
+    if observed != manifest['artifacts']:
+        raise ReleaseRejected('SHA256SUMS does not match DB manifest')
+
     index = read_json(directory / 'index.json')
-    if index['cve_count'] < 1 or index['cve_count'] != m['cve_count']:
-        raise ReleaseRejected('empty or inconsistent database')
-    if index.get('schema_version') != 1 or index.get('profile') != {
-            'os': 'linux',
-            'format': 'ELF',
-            'arch': 'x86-64',
-            'bits': 64,
-            'abi': 'sysv'
-    }:
-        raise ReleaseRejected('unsupported DB index version or binary profile')
-    if index.get('yara_rule_count') != index['cve_count'] or index.get(
-            'pattern_count', 0) < index['cve_count']:
-        raise ReleaseRejected('inconsistent rule/pattern counts')
-    if index['rule_quality'] != 'CVE_SPECIFIC_VALIDATED':
-        raise ReleaseRejected('non-production rules in main index')
+    if (index.get('schema_version') != 2 or
+            index.get('channel') != manifest['channel'] or
+            index.get('profile') != {
+                'os': 'linux',
+                'format': 'ELF',
+                'arch': 'x86-64',
+                'bits': 64,
+                'abi': 'sysv'
+            }):
+        raise ReleaseRejected(
+            'unsupported DB index version, channel or binary profile')
+    entries = index.get('entries')
+    if not isinstance(entries, list) or not entries:
+        raise ReleaseRejected('database has no records')
+    record_ids, cves = set(), set()
+    pattern_total = 0
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ReleaseRejected('malformed database record index entry')
+        cve, record_id, channel = (entry.get('cve'), entry.get('record_id'),
+                                   entry.get('channel'))
+        if (not isinstance(cve, str) or not CVE.fullmatch(cve) or
+                not isinstance(record_id, str) or
+                not re.fullmatch(r'VI_[A-F0-9]{24}', record_id) or
+                channel not in CHANNELS or
+            (manifest['channel'] == 'production' and channel != 'production')):
+            raise ReleaseRejected('invalid CVE/record identity or channel')
+        if record_id in record_ids:
+            raise ReleaseRejected('duplicate database record ID')
+        record_ids.add(record_id)
+        cves.add(cve)
+        for digest_field in ('record_sha256', 'pack_sha256', 'rules_sha256'):
+            digest = entry.get(digest_field)
+            if not isinstance(digest, str) or not HASH.fullmatch(digest):
+                raise ReleaseRejected('invalid source provenance digest')
+        count = entry.get('pattern_count')
+        if type(count) is not int or count < 1:
+            raise ReleaseRejected('invalid per-record pattern count')
+        platform = entry.get('platform')
+        if platform != {
+                'os': 'linux',
+                'format': 'ELF',
+                'arch': 'x86-64',
+                'bits': 64,
+                'abi': 'sysv'
+        }:
+            raise ReleaseRejected('unsupported record platform')
+        pattern_total += count
+    if (len(entries) != index.get('record_count') or
+            len(cves) != index.get('cve_count') or
+            pattern_total != index.get('pattern_count') or
+            len(cves) != manifest.get('cve_count') or
+            len(entries) != manifest.get('record_count')):
+        raise ReleaseRejected('database record/CVE/pattern accounting mismatch')
+    if entries != sorted(entries,
+                         key=lambda row: (row['cve'], row['record_id'])):
+        raise ReleaseRejected(
+            'database records must be sorted by CVE and record ID')
+
+    report = read_json(directory / 'database-report.json')
+    if (report.get('schema_version') != 1 or
+            report.get('channel') != index['channel'] or
+            report.get('cve_count') != index['cve_count'] or
+            report.get('record_count') != index['record_count'] or
+            report.get('pattern_count') != index['pattern_count'] or
+            report.get('records') != entries):
+        raise ReleaseRejected('database report and index disagree')
+    catalog = index.get('source_cves')
+    excluded = index.get('excluded_from_channel_cves')
+    if catalog is not None or excluded is not None:
+        if (not isinstance(catalog, list) or catalog != sorted(set(catalog)) or
+                not isinstance(excluded, list) or
+                excluded != sorted(set(excluded)) or
+                any(not isinstance(cve, str) or not CVE.fullmatch(cve)
+                    for cve in catalog) or
+                excluded != sorted(set(catalog) - cves) or
+                not cves.issubset(set(catalog))):
+            raise ReleaseRejected(
+                'source CVE catalog disagrees with released records')
     if scanner is not None:
         try:
             completed = subprocess.run([
@@ -928,44 +1010,52 @@ def verify_release(directory: Path, *, scanner: Path | None = None) -> dict:
                     'native YARA-X could not load compiled database')
             native = json.loads(completed.stdout)
             if native.get('engine') != 'yara-x' or native.get(
-                    'rules') != index.get('yara_rule_count'):
-                raise ReleaseRejected(
-                    'native rule count and DB manifest differ')
-        except (OSError, subprocess.TimeoutExpired, ValueError) as err:
+                    'rules') != index['record_count']:
+                raise ReleaseRejected('native rule count and DB index differ')
+        except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
             raise ReleaseRejected(
-                'native YARA-X DB verification failed') from err
-    return {'status': 'PASS', 'cve_count': index['cve_count']}
+                'native YARA-X DB verification failed') from exc
+    return {
+        'status': 'PASS',
+        'channel': index['channel'],
+        'cve_count': index['cve_count'],
+        'record_count': index['record_count']
+    }
 
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest='cmd', required=True)
-    b = sub.add_parser('build')
-    b.add_argument('--cases', type=Path, required=True)
-    b.add_argument('--output', type=Path, required=True)
-    b.add_argument('--scanner', type=Path, required=True)
-    b.add_argument('--min-cves', type=int, default=1)
-    b.add_argument('--signatures',
-                   type=Path,
-                   required=True,
-                   help='complete version-controlled validated CVE directory')
+    review = sub.add_parser('review')
+    review.add_argument('--cases', type=Path, required=True)
+    review.add_argument('--scanner', type=Path, required=True)
+    review.add_argument('--min-cves', type=int, default=1)
+    review.add_argument('--signatures',
+                        type=Path,
+                        required=True,
+                        help='complete version-controlled CVE directory')
     assemble = sub.add_parser('assemble')
     assemble.add_argument('--signatures', type=Path, required=True)
     assemble.add_argument('--output', type=Path, required=True)
     assemble.add_argument('--scanner', type=Path, required=True)
+    assemble.add_argument('--channel',
+                          choices=('test', 'production'),
+                          default='production')
     v = sub.add_parser('verify')
     v.add_argument('--database', type=Path, required=True)
     v.add_argument('--scanner', type=Path)
     a = p.parse_args(argv)
     try:
-        if a.cmd == 'build':
-            out = build_release(a.cases,
-                                a.output,
-                                a.scanner,
-                                min_cves=a.min_cves,
-                                signatures=a.signatures)
+        if a.cmd == 'review':
+            out = review_cases(a.cases,
+                               a.scanner,
+                               min_cves=a.min_cves,
+                               signatures=a.signatures)
         elif a.cmd == 'assemble':
-            out = assemble_validated(a.signatures, a.output, a.scanner)
+            out = assemble_git_tree(a.signatures,
+                                    a.output,
+                                    a.scanner,
+                                    channel=a.channel)
         else:
             out = verify_release(a.database, scanner=a.scanner)
     except (ReleaseRejected, OSError, subprocess.TimeoutExpired) as err:

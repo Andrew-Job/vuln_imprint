@@ -1,52 +1,69 @@
 # Architecture
 
+VulnImprint is a static, CVE-oriented Linux ELF machine-code scanner. Its
+supported binary target is little-endian ELF64 x86-64, System V ABI.
+The execution engine is official YARA-X 1.23.0 (C API); ELF metadata is
+parsed by ELFIO 3.12. Scanner execution does not execute or emulate the target.
+
 ```text
-Factory research (Python) -> candidate YARA-X rules and evidence
-           |
-           v
-independent native CVE validation + technical PR review
-           |
-           v
-signatures/validated/ (Git: single approved CVE source of truth)
-           |
-           v
-native YARA-X compilation of all approved rules at release build
-           |
-           v
-one installable application archive: scanner + runtime + DB
-           |
-           v
-verified GitHub Release with attestation and integrity manifests
+Factory (Python): source provenance, builds, disassembly, pattern validation
+      |
+      v
+signatures/CVE-*/: research.json and optional independent DB records
+      |
+      v
+Git source checks -> YARA-X test database -> native integration checks
+      |
+      v
+production_db assemble (production records only)
+      |
+      v
+Native Scanner (C++20, static YARA-X C API) + compiled DB + metadata
+      |
+      v
+verified release archive and separately attested release assets
 ```
 
-## Scanner
+## Executable-range policy
 
-The C++20 scanner reads regular files without following symlinks, validates
-the currently supported ELF64 little-endian x86-64 format through ELFIO,
-selects file-backed executable regions, scans through the official YARA-X
-C API, and emits structured matching offsets, CVE IDs, truncation and errors.
-`--all-sections` is a diagnostic full-file scan of an **already validated ELF**,
-not an arbitrary-file scanner. The code and rule-validation profiles must be
-extended together before accepting other formats or architectures.
+- `ET_REL`: bytes of sections with `SHF_EXECINSTR`.
+- `ET_EXEC` and `ET_DYN`: file-backed intersections of `SHF_EXECINSTR`
+  sections and `PT_LOAD` segments marked `PF_X`, including partial overlaps.
+- `ET_EXEC` and `ET_DYN` without section headers: the file-backed ranges of
+  executable `PT_LOAD` segments. These ranges can also contain non-code bytes.
 
-## Factory and database
+Offsets refer to the original file. Virtual addresses are reported only when
+unambiguously mapped; an `ET_REL` file offset is not a linked virtual address.
+The scanner rejects unsupported or malformed ELF with diagnostics. Diagnostic
+`--all-sections` scans the full **validated ELF**, not arbitrary files, and
+classifies findings according to their executable-range membership.
 
-Factory orchestrates pinned source acquisition, versioned build profiles,
-disassembly and candidate masks. Candidate masks are never automatically
-production rules. CVE approval includes independent affected/fixed/backport
-and unrelated controls, source/digest provenance, and native YARA-X validation.
-Approved `pack.json`, `rules-exec.yar` and `reviewed-evidence.json` files are
-tracked under `signatures/validated/` in the protected Git tree.
+The JSON schema is `vulnimprint.scan.yarax.v2`. Every machine-rule finding
+identifies its CVE, independent `record_id`, pattern and file offset. The
+reported `cve_count` counts unique CVEs, not patterns or records. Linux
+pathname bytes are preserved in `file_bytes_hex`, while `file` is for display.
+Errors and truncated results are explicit.
 
-A separate corpus of independent specimen binaries exists only for native
-admission tests. It is never consumed by the user's launcher. The release
-build uses the complete approved source tree and publishes one compatible
-compiled database within the application archive; the installed version
-and DB are upgraded together.
+## Records, evidence and release
 
-## Compatibility boundary
+A CVE may own zero or more records, each with a canonical `record_sha256`,
+platform profile, alternative machine patterns and channel `test` or
+`production`. Reusing the same bytes for another CVE requires a separately
+owned record. Channel selection controls database inclusion, **not**
+detection confidence.
 
-Only the first Linux ELF64 x86-64 profile is implemented and tested.
-Additional formats (PE, Mach-O, firmware images), architectures, ABIs and
-compiler variants are future profile implementations, not present claims.
-Unsupported file formats produce explicit errors rather than clean results.
+Factory records compiler/source provenance and checks proposed patterns with
+the pinned Python YARA-X binding. `production_db review` validates independently
+collected per-record evidence; it does not generate a database.
+`production_db assemble` is the only builder of the compiled test and
+production databases, taking records from the Git source tree.
+
+The release ships the Native Scanner statically linked with YARA-X and the
+compiled production database together. Build/test jobs and publication jobs
+have separate privileges; publication verifies the complete artifact set.
+See [Database](DATABASE.md), [Development](DEVELOPMENT.md) and
+[Release verification](RELEASE_SIGNING.md).
+
+A machine-code match is evidence of bytes matching a specific rule, not proof
+of exploitability. A clean scan cannot rule out a CVE or an unexamined build
+profile.

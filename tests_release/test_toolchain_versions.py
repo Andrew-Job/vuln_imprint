@@ -47,13 +47,6 @@ def test_release_evidence_needs_real_versions(monkeypatch):
         'optimization': '-O2',
         'compiler_major': 12,
     }
-    monkeypatch.setattr(
-        'tools.production_db.probe_compiler',
-        lambda *args, **kwargs: {
-            'binary_sha256': 'a' * 64,
-            'target': 'x86_64-linux-gnu',
-        },
-    )
     row = {
         'binary_kind': 'source_built_elf',
         'artifact_role': 'host_0',

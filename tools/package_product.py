@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package a verified native scanner, YARA-X library, and pinned database.
+"""Package a scanner statically linked with YARA-X and its pinned database.
 
 The Linux package relies on the documented compatible system runtime; it
 never builds from placeholders or silently resolves a missing dependency.
@@ -62,28 +62,18 @@ def write_reproducible_archive(root: Path, output: Path) -> None:
                                 filter=normalize)
 
 
-def build_product(database: Path, scanner: Path, library: Path, version: str,
-                  out: Path):
+def build_product(database: Path, scanner: Path, version: str, out: Path):
     if not TAG.fullmatch(version):
         raise ReleaseRejected('invalid release version')
     verify_release(database, scanner=scanner)
     if not scanner.is_file() or not os.access(scanner, os.X_OK):
         raise ReleaseRejected('native scanner missing')
-    if not library.is_file():
-        raise ReleaseRejected('actual yara_x_capi library missing')
     with tempfile.TemporaryDirectory(prefix='vulnimprint-pkg-') as tmp:
         root = Path(tmp) / 'vulnimprint'
         (root / 'bin').mkdir(parents=True)
-        (root / 'lib').mkdir()
         (root / 'share/vulnimprint').mkdir(parents=True)
         (root / 'licenses/yara-x').mkdir(parents=True)
         shutil.copy2(scanner, root / 'bin/vulnimprint-scan')
-        # Include the full SONAME family, preserving names expected by the ELF loader.
-        for item in sorted(library.parent.glob('libyara_x_capi.so*')):
-            if item.is_file() or item.is_symlink():
-                shutil.copy2(item, root / 'lib' / item.name)
-        if not list((root / 'lib').iterdir()):
-            raise ReleaseRejected('cannot stage YARA-X shared library')
         source = Path(__file__).resolve().parent
         shutil.copy2(source / 'vulnimprint.sh', root / 'bin/vulnimprint')
         project = source.parent
@@ -109,9 +99,20 @@ def build_product(database: Path, scanner: Path, library: Path, version: str,
         (root / 'bin/vulnimprint').chmod(0o755)
         (root / 'share/vulnimprint/RELEASE_VERSION').write_text(version + '\n')
         shutil.copytree(database, root / 'share/vulnimprint/db')
-        # Security invariant: the compiled native binary must load from bundled lib.
+        # Static YARA-X must have no runtime SONAME dependency; compatible
+        # system libraries may still be dynamically linked by the executable.
         clean_env = os.environ.copy()
         clean_env.pop('LD_LIBRARY_PATH', None)
+        dynamic = subprocess.run(
+            ['readelf', '-d',
+             str(root / 'bin/vulnimprint-scan')],
+            capture_output=True,
+            text=True,
+            env=clean_env,
+            timeout=30)
+        if dynamic.returncode != 0 or 'libyara_x_capi' in dynamic.stdout:
+            raise ReleaseRejected(
+                'scanner is not statically linked with YARA-X')
         ldd = subprocess.run(['ldd', str(root / 'bin/vulnimprint-scan')],
                              capture_output=True,
                              text=True,
@@ -119,24 +120,6 @@ def build_product(database: Path, scanner: Path, library: Path, version: str,
         if ldd.returncode != 0 or 'not found' in ldd.stdout or 'not found' in ldd.stderr:
             raise ReleaseRejected('runtime dependencies unresolved: ' +
                                   ldd.stdout[:800])
-        if not any('libyara_x_capi.so' in line and str(root / 'lib') in line
-                   for line in ldd.stdout.splitlines()):
-            raise ReleaseRejected(
-                'scanner did not resolve YARA-X from its bundled lib directory')
-        for bundled_library in sorted(
-            (root / 'lib').glob('libyara_x_capi.so*')):
-            if bundled_library.is_symlink():
-                continue
-            resolution = subprocess.run(['ldd', str(bundled_library)],
-                                        capture_output=True,
-                                        text=True,
-                                        env=clean_env,
-                                        timeout=30)
-            if (resolution.returncode != 0 or
-                    'not found' in resolution.stdout or
-                    'not found' in resolution.stderr):
-                raise ReleaseRejected(
-                    'YARA-X runtime has unresolved dependencies')
         check = subprocess.run([
             str(root / 'bin/vulnimprint-scan'), 'verify', '--compiled',
             str(root / 'share/vulnimprint/db/database.yarc')
@@ -158,14 +141,11 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument('--database', type=Path, required=True)
     p.add_argument('--scanner', type=Path, required=True)
-    p.add_argument('--yarax-lib', type=Path, required=True)
     p.add_argument('--version', required=True)
     p.add_argument('--output', type=Path, required=True)
     a = p.parse_args()
     try:
-        print(
-            build_product(a.database, a.scanner, a.yarax_lib, a.version,
-                          a.output))
+        print(build_product(a.database, a.scanner, a.version, a.output))
         return 0
     except (ReleaseRejected, OSError) as e:
         print('PRODUCT BLOCKED:', e)

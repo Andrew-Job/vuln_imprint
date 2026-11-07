@@ -1,250 +1,258 @@
-"""These are offline negative/packaging tests, NOT CVE proof or YARA-X tests."""
+"""Offline DB integrity tests; these do not claim CVE detector correctness."""
 import json
-import io
 import tarfile
 from pathlib import Path
+
 import pytest
-from tools.production_db import build_release, ReleaseRejected, verify_release, sha256, validate_case, validate_source_pack
+
+from factory.signature_identity import new_record_id, record_sha256
+from factory.yara_engine import source_from_packs
+from tools.production_db import (review_cases, ReleaseRejected, verify_release,
+                                 sha256, validate_case, validate_source_pack)
+
+CVE = 'CVE-2026-12345'
+PLATFORM = {
+    'os': 'linux',
+    'format': 'ELF',
+    'arch': 'x86-64',
+    'bits': 64,
+    'abi': 'sysv'
+}
 
 
 def test_cannot_publish_zero_packs(tmp_path):
     cases = tmp_path / 'cases'
     cases.mkdir()
     with pytest.raises(ReleaseRejected, match='requires >=1000'):
-        build_release(cases,
-                      tmp_path / 'out',
-                      Path('/usr/bin/true'),
-                      min_cves=1000)
+        review_cases(cases, Path('/usr/bin/true'), min_cves=1000)
     assert not (tmp_path / 'out').exists()
 
 
-def test_candidate_is_not_admitted(tmp_path):
-    case = tmp_path / 'CVE-2026-25646'
+def _record(cve=CVE, *, channel='production', pattern=None):
+    pattern = pattern or ' '.join(['90'] * 28)
+    return {
+        'record_id':
+            new_record_id(cve),
+        'channel':
+            channel,
+        'source_type':
+            'manual',
+        'platform':
+            dict(PLATFORM),
+        'rules': [{
+            'id': 'p0',
+            'hex': pattern,
+            'length': len(pattern.split()),
+            'fixed_bytes': sum('?' not in token for token in pattern.split())
+        }],
+    }
+
+
+def _pack(cve=CVE, *, channel='production', pattern=None):
+    return {
+        'schema_version': 3,
+        'cve': cve,
+        'records': [_record(cve, channel=channel, pattern=pattern)]
+    }
+
+
+def test_only_test_and_production_channels_are_allowed(tmp_path):
+    pack = _pack(channel='candidate')
+    case = tmp_path / 'case'
     case.mkdir()
-    (case / 'pack.json').write_text(
-        json.dumps({
-            'cve': 'CVE-2026-25646',
-            'schema_version': 1,
-            'rules': [],
-            'status': 'EXPERIMENTAL_NO_BLIND_HOLDOUT',
-            'platform': {
-                'format': 'ELF',
-                'arch': 'x86-64',
-                'bits': 64
-            }
-        }))
-    with pytest.raises(ReleaseRejected, match='empty patterns'):
-        validate_case(case, Path('/usr/bin/true'))
+    (case / 'pack.json').write_text(json.dumps(pack))
+    rulefile = case / 'rules-exec.yar'
+    rulefile.write_text('')
+    with pytest.raises(ReleaseRejected, match='test or production'):
+        validate_source_pack(pack, rulefile, packfile=case / 'pack.json')
 
 
 def dummy_db(path):
-    """Metadata-only fixture for testing SHA and update transaction logic."""
+    """Create a metadata-only fixture that satisfies the DB integrity schema."""
     path.mkdir()
-    for name, content in [('database.yarc', b'not actually compiled'),
-                          ('database.yar', b'rule fake {}'),
-                          ('quality-report.json', b'{}'),
-                          ('index.json',
-                           json.dumps({
-                               'cve_count': 1,
-                               'rule_quality': 'CVE_SPECIFIC_VALIDATED',
-                               'schema_version': 1,
-                               'yara_rule_count': 1,
-                               'pattern_count': 1,
-                               'profile': {
-                                   'os': 'linux',
-                                   'format': 'ELF',
-                                   'arch': 'x86-64',
-                                   'bits': 64,
-                                   'abi': 'sysv'
-                               }
-                           }).encode())]:
-        (path / name).write_bytes(content)
-    files = {p.name: sha256(p) for p in path.iterdir()}
-    (path / 'manifest.json').write_text(
-        json.dumps({
-            'schema_version': 2,
-            'artifacts': files,
-            'cve_count': 1,
-            'profile': 'linux-elf64-x86_64-sysv',
-            'engine': {
-                'name': 'yara-x-capi',
-                'version': '1.23.0',
-                'serialized_rules_format': 'yara-x',
-                'scanner_min_version': '0.1.0',
-                'scanner_max_exclusive': '0.2.0'
-            }
-        }))
-    (path / 'SHA256SUMS').write_text(''.join(
-        f'{digest}  {name}\n' for name, digest in sorted(files.items())))
-    return path
-
-
-def test_nonproduction_quality_rejected(tmp_path):
-    dummy_db(tmp_path / 'db')
-    p = tmp_path / 'db' / 'index.json'
-    j = json.loads(p.read_text())
-    j['rule_quality'] = 'AFFECTED_FAMILY_VALIDATED'
-    p.write_text(json.dumps(j))
-    m = tmp_path / 'db' / 'manifest.json'
-    j = json.loads(m.read_text())
-    j['artifacts']['index.json'] = sha256(p)
-    m.write_text(json.dumps(j))
-    (tmp_path / 'db' / 'SHA256SUMS').write_text(''.join(
-        f'{digest}  {name}\n'
-        for name, digest in sorted(j['artifacts'].items())))
-    with pytest.raises(ReleaseRejected, match='non-production rules'):
-        verify_release(tmp_path / 'db')
-
-
-def test_sha256sums_disagreement_rejected(tmp_path):
-    db = dummy_db(tmp_path / 'db')
-    (db / 'SHA256SUMS').write_text('00' + (db / 'SHA256SUMS').read_text()[2:])
-    with pytest.raises(ReleaseRejected, match='SHA256SUMS'):
-        verify_release(db)
-
-
-def test_forged_fixed_byte_strength_is_rejected(tmp_path):
-    case = tmp_path / 'CVE-2099-10001'
-    case.mkdir()
-    source = case / 'rules-exec.yar'
-    source.write_text('rule dummy {condition: true}\n')
-    fake_pattern = ' '.join(['??'] * 64)
-    pack = {
-        'schema_version':
-            1,
-        'cve':
-            'CVE-2099-10001',
-        'status':
-            'EXPERIMENTAL',
-        'platform': {
+    record_data = _record(CVE)
+    record = {
+        'cve': CVE,
+        'record_id': record_data['record_id'],
+        'record_sha256': record_sha256(record_data),
+        'channel': 'production',
+        'platform': dict(PLATFORM),
+        'pattern_count': 1,
+        'pack_sha256': 'a' * 64,
+        'rules_sha256': 'b' * 64,
+    }
+    index = {
+        'schema_version': 2,
+        'name': 'VulnImprint DB',
+        'channel': 'production',
+        'profile': {
             'os': 'linux',
             'format': 'ELF',
             'arch': 'x86-64',
             'bits': 64,
             'abi': 'sysv'
         },
-        'rules': [{
-            'id': 'test-0',
-            'hex': fake_pattern,
-            'length': 64,
-            'fixed_bytes': 64
-        }]
+        'record_count': 1,
+        'pattern_count': 1,
+        'cve_count': 1,
+        'entries': [record],
     }
-    with pytest.raises(ReleaseRejected,
-                       match='length/fixed_bytes do not match'):
-        validate_source_pack(pack, source, packfile=case / 'pack.json')
-    pack['rules'][0]['fixed_bytes'] = 0
+    report = {
+        'schema_version': 1,
+        'channel': 'production',
+        'record_count': 1,
+        'pattern_count': 1,
+        'cve_count': 1,
+        'records': [record]
+    }
+    (path / 'database.yarc').write_bytes(b'not actually compiled')
+    (path / 'database.yar').write_text('rule fixture {}')
+    (path / 'index.json').write_text(json.dumps(index))
+    (path / 'database-report.json').write_text(json.dumps(report))
+    files = {p.name: sha256(p) for p in path.iterdir()}
+    manifest = {
+        'schema_version': 3,
+        'artifacts': files,
+        'cve_count': 1,
+        'record_count': 1,
+        'profile': 'linux-elf64-x86_64-sysv',
+        'channel': 'production',
+        'engine': {
+            'name': 'yara-x-capi',
+            'version': '1.23.0',
+            'serialized_rules_format': 'yara-x',
+            'scanner_min_version': '0.1.0',
+            'scanner_max_exclusive': '0.2.0'
+        },
+    }
+    (path / 'manifest.json').write_text(json.dumps(manifest))
+    (path / 'SHA256SUMS').write_text(''.join(
+        f'{digest}  {name}\n' for name, digest in sorted(files.items())))
+    return path
+
+
+def _rehash_db(database):
+    manifest_path = database / 'manifest.json'
+    manifest = json.loads(manifest_path.read_text())
+    for name in manifest['artifacts']:
+        manifest['artifacts'][name] = sha256(database / name)
+    manifest_path.write_text(json.dumps(manifest))
+    (database / 'SHA256SUMS').write_text(''.join(
+        f'{digest}  {name}\n'
+        for name, digest in sorted(manifest['artifacts'].items())))
+
+
+def test_index_channel_must_match_production_manifest(tmp_path):
+    database = dummy_db(tmp_path / 'db')
+    index_path = database / 'index.json'
+    index = json.loads(index_path.read_text())
+    index['channel'] = 'test'
+    index_path.write_text(json.dumps(index))
+    _rehash_db(database)
+    with pytest.raises(ReleaseRejected, match='index version, channel'):
+        verify_release(database)
+
+
+def test_sha256sums_disagreement_rejected(tmp_path):
+    database = dummy_db(tmp_path / 'db')
+    (database /
+     'SHA256SUMS').write_text('00' + (database / 'SHA256SUMS').read_text()[2:])
+    with pytest.raises(ReleaseRejected, match='SHA256SUMS'):
+        verify_release(database)
+
+
+def test_forged_fixed_byte_strength_is_rejected(tmp_path):
+    case = tmp_path / CVE
+    case.mkdir()
+    source = case / 'rules-exec.yar'
+    source.write_text('rule dummy { condition: true }\n')
+    fake_pattern = ' '.join(['??'] * 64)
+    pack = _pack(pattern=fake_pattern)
+    pack['records'][0]['rules'][0]['length'] = 64
+    pack['records'][0]['rules'][0]['fixed_bytes'] = 64
+    pack_path = case / 'pack.json'
+    pack_path.write_text(json.dumps(pack))
+    with pytest.raises(ReleaseRejected, match='length/fixed_bytes mismatch'):
+        validate_source_pack(pack, source, packfile=pack_path)
+    pack['records'][0]['rules'][0]['fixed_bytes'] = 0
     with pytest.raises(ReleaseRejected, match='weak pattern'):
-        validate_source_pack(pack, source, packfile=case / 'pack.json')
+        validate_source_pack(pack, source, packfile=pack_path)
 
 
 def test_release_contents_binds_embedded_database_and_download_bytes(tmp_path):
-    """Our release identity must bind the DB inside the only product archive."""
     from tools.release_approval import make_contents, verify_contents
 
-    database = dummy_db(tmp_path / "db")
-    index_path = database / "index.json"
-    index = json.loads(index_path.read_text())
-    index["entries"] = [{
-        "cve": "CVE-2026-12345",
-        "quality": "CVE_SPECIFIC_VALIDATED",
-        "pack_sha256": "a" * 64,
-        "rules_sha256": "b" * 64,
-    }]
-    index_path.write_text(json.dumps(index))
-    manifest_path = database / "manifest.json"
-    manifest = json.loads(manifest_path.read_text())
-    manifest["artifacts"]["index.json"] = sha256(index_path)
-    manifest_path.write_text(json.dumps(manifest))
-    (database / "SHA256SUMS").write_text("".join(
-        f"{digest}  {name}\n"
-        for name, digest in sorted(manifest["artifacts"].items())))
-
-    product = tmp_path / "vulnimprint-linux-x86_64.tar.gz"
+    database = dummy_db(tmp_path / 'db')
+    product = tmp_path / 'vulnimprint-linux-x86_64.tar.gz'
 
     def make_product(directory):
-        with tarfile.open(product, "w:gz") as archive:
+        with tarfile.open(product, 'w:gz') as archive:
             for file in sorted(directory.iterdir()):
                 archive.add(file,
-                            arcname="vulnimprint/share/vulnimprint/db/" +
+                            arcname='vulnimprint/share/vulnimprint/db/' +
                             file.name)
 
     make_product(database)
-    sbom = tmp_path / "SBOM.spdx.json"
+    sbom = tmp_path / 'SBOM.spdx.json'
     sbom.write_text('{"spdxVersion": "SPDX-2.3"}')
-    contents = make_contents(database, "v0.1.0", "c" * 40, [product, sbom])
-    assert [item["cve"] for item in contents["cves"]] == ["CVE-2026-12345"]
-    statement_path = tmp_path / "release-contents.json"
+    contents = make_contents(database, 'v0.1.0', 'c' * 40, [product, sbom])
+    assert [item['cve'] for item in contents['cves']] == [CVE]
+    assert contents['record_count'] == 1
+    statement_path = tmp_path / 'release-contents.json'
     statement_path.write_text(json.dumps(contents))
-    assert verify_contents(statement_path, tmp_path)["cve_count"] == 1
+    assert verify_contents(statement_path, tmp_path)['record_count'] == 1
 
-    product.write_bytes(b"tampered")
-    with pytest.raises(ReleaseRejected, match="digest mismatch"):
+    product.write_bytes(b'tampered')
+    with pytest.raises(ReleaseRejected, match='digest mismatch'):
         verify_contents(statement_path, tmp_path)
 
-    # Rehashing a different product archive does not make its CVE list match.
-    other = tmp_path / "other"
+    other = tmp_path / 'other'
     other.mkdir()
     import shutil
     shutil.copytree(database, other, dirs_exist_ok=True)
-    alt_index = json.loads((other / "index.json").read_text())
-    alt_index["entries"][0]["rules_sha256"] = "e" * 64
-    (other / "index.json").write_text(json.dumps(alt_index))
-    alt_manifest = json.loads((other / "manifest.json").read_text())
-    alt_manifest["artifacts"]["index.json"] = sha256(other / "index.json")
-    (other / "manifest.json").write_text(json.dumps(alt_manifest))
-    (other / "SHA256SUMS").write_text("".join(
-        f"{digest}  {name}\n"
-        for name, digest in sorted(alt_manifest["artifacts"].items())))
+    alt_index = json.loads((other / 'index.json').read_text())
+    alt_index['entries'][0]['rules_sha256'] = 'e' * 64
+    (other / 'index.json').write_text(json.dumps(alt_index))
+    alt_report = json.loads((other / 'database-report.json').read_text())
+    alt_report['records'] = alt_index['entries']
+    (other / 'database-report.json').write_text(json.dumps(alt_report))
+    _rehash_db(other)
     make_product(other)
-    contents["artifacts"][product.name] = sha256(product)
+    contents['artifacts'][product.name] = sha256(product)
     statement_path.write_text(json.dumps(contents))
-    with pytest.raises(ReleaseRejected, match="does not bind embedded DB"):
+    with pytest.raises(ReleaseRejected, match='does not bind embedded DB'):
         verify_contents(statement_path, tmp_path)
 
 
-def test_release_includes_every_validated_git_case_without_selection(tmp_path):
-    """The source of membership is the validated Git tree, never a selector."""
-    cases = tmp_path / "cases"
-    cases.mkdir()
-    git = tmp_path / "validated"
+def test_review_requires_matching_cve_source(tmp_path):
+    cases = tmp_path / 'cases'
+    case = cases / CVE
+    case.mkdir(parents=True)
+    git = tmp_path / 'validated'
     git.mkdir()
-    scanner = tmp_path / "scanner"
-    scanner.write_text("#!/bin/sh\nexit 0\n")
+    canonical = git / CVE
+    canonical.mkdir()
+    pack = _pack()
+    source = source_from_packs([pack])
+    for directory in (case, canonical):
+        (directory / 'pack.json').write_text(json.dumps(pack))
+        (directory / 'rules-exec.yar').write_text(source)
+        (directory / 'reviewed-evidence.json').write_text('{}')
+    scanner = tmp_path / 'scanner'
+    scanner.write_text('#!/bin/sh\nexit 0\n')
     scanner.chmod(0o755)
-
-    for cve in ("CVE-2026-12345", "CVE-2026-67890"):
-        case = cases / cve
-        case.mkdir()
-        canonical = git / cve
-        canonical.mkdir()
-        for dest in (case, canonical):
-            (dest / "pack.json").write_text(json.dumps({"cve": cve}))
-            (dest /
-             "rules-exec.yar").write_text("rule example { condition: true }\n")
-            (dest / "reviewed-evidence.json").write_text("{}")
-
-    # Both CVEs pass the initial canonical-source membership check. The
-    # intentionally incomplete samples then fail independently at validation.
-    with pytest.raises(ReleaseRejected, match="unsupported pack schema"):
-        build_release(cases, tmp_path / "output", scanner, signatures=git)
-
-    # Missing one Git CVE must never cause the release builder to drop it.
-    (git / "CVE-2026-67890" / "pack.json").unlink()
     with pytest.raises(ReleaseRejected,
-                       match="differs from version-controlled source"):
-        build_release(cases, tmp_path / "output", scanner, signatures=git)
+                       match='mismatched evidence schema or CVE'):
+        review_cases(cases, scanner, signatures=git)
 
 
 def test_unknown_corpus_cve_cannot_be_auto_published(tmp_path):
-    cases = tmp_path / "cases"
-    case = cases / "CVE-2026-12345"
+    cases = tmp_path / 'cases'
+    case = cases / CVE
     case.mkdir(parents=True)
-    (case / "pack.json").write_text('{"cve": "CVE-2026-12345"}')
-    canonical = tmp_path / "validated"
+    (case / 'pack.json').write_text(json.dumps(_pack()))
+    canonical = tmp_path / 'validated'
     canonical.mkdir()
-    with pytest.raises(ReleaseRejected, match="CVE mismatch"):
-        build_release(cases,
-                      tmp_path / "output",
-                      Path("/usr/bin/true"),
-                      signatures=canonical)
+    with pytest.raises(ReleaseRejected,
+                       match='Git signature / reviewed corpus CVE mismatch'):
+        review_cases(cases, Path('/usr/bin/true'), signatures=canonical)

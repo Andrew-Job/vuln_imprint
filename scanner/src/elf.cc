@@ -2,6 +2,7 @@
 // selects only file-backed executable regions for its scanning contract.
 #include "vulnimprint/elf.h"
 
+#include <algorithm>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -225,16 +226,76 @@ std::vector<Segment> executable_regions(const std::vector<std::uint8_t>& file) {
                                std::nullopt});
         }
     } else {
-        for (const auto& segment : reader.segments) {
-            if (segment->get_type() != ELFIO::PT_LOAD ||
-                (segment->get_flags() & ELFIO::PF_X) == 0 ||
-                segment->get_file_size() == 0) {
-                continue;
+        // Prefer executable sections when section headers are present. PF_X
+        // alone does not guarantee that every byte is executable code: a
+        // combined RX segment can also contain read-only constants.
+        if (reader.sections.size() != 0) {
+            for (const auto& section : reader.sections) {
+                if ((section->get_flags() & ELFIO::SHF_EXECINSTR) == 0 ||
+                    section->get_type() == ELFIO::SHT_NULL ||
+                    section->get_type() == ELFIO::SHT_NOBITS ||
+                    section->get_size() == 0) {
+                    continue;
+                }
+                const auto section_va = section->get_address();
+                const auto section_offset = section->get_offset();
+                const auto section_end = section_offset + section->get_size();
+                for (const auto& segment : reader.segments) {
+                    if (segment->get_type() != ELFIO::PT_LOAD ||
+                        (segment->get_flags() & ELFIO::PF_X) == 0 ||
+                        segment->get_file_size() == 0) {
+                        continue;
+                    }
+                    const auto segment_offset = segment->get_offset();
+                    const auto segment_end =
+                        segment_offset + segment->get_file_size();
+                    // A section may straddle a file-backed PT_LOAD boundary.
+                    // Scan only the intersection, not the entire section and
+                    // not a larger RX segment containing inert data.
+                    const auto begin = std::max(section_offset, segment_offset);
+                    const auto end = std::min(section_end, segment_end);
+                    if (begin >= end) continue;
+                    const auto section_delta = begin - section_offset;
+                    const auto segment_delta = begin - segment_offset;
+                    const auto limit =
+                        std::numeric_limits<std::uint64_t>::max();
+                    if (section_delta > limit - section_va ||
+                        segment_delta >
+                            limit - segment->get_virtual_address()) {
+                        throw std::runtime_error(
+                            "ELF virtual address overflow");
+                    }
+                    const auto section_address = section_va + section_delta;
+                    const auto segment_address =
+                        segment->get_virtual_address() + segment_delta;
+                    if (section_address != segment_address) {
+                        throw std::runtime_error(
+                            "Executable section has inconsistent PT_LOAD "
+                            "mapping");
+                    }
+                    if (end - begin - 1 > limit - section_address) {
+                        throw std::runtime_error(
+                            "ELF virtual address overflow");
+                    }
+                    regions.push_back({static_cast<std::size_t>(begin),
+                                       static_cast<std::size_t>(end - begin),
+                                       section_address});
+                }
             }
-            regions.push_back(
-                {static_cast<std::size_t>(segment->get_offset()),
-                 static_cast<std::size_t>(segment->get_file_size()),
-                 segment->get_virtual_address()});
+        } else {
+            // Sectionless/fully stripped ELF still supports segment scanning.
+            // Treat these bytes as potentially containing embedded data.
+            for (const auto& segment : reader.segments) {
+                if (segment->get_type() != ELFIO::PT_LOAD ||
+                    (segment->get_flags() & ELFIO::PF_X) == 0 ||
+                    segment->get_file_size() == 0) {
+                    continue;
+                }
+                regions.push_back(
+                    {static_cast<std::size_t>(segment->get_offset()),
+                     static_cast<std::size_t>(segment->get_file_size()),
+                     segment->get_virtual_address()});
+            }
         }
     }
     if (regions.empty()) {

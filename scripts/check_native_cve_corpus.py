@@ -16,8 +16,8 @@ import tempfile
 from pathlib import Path
 
 from scripts.safe_unpack_corpus import unpack
-from scripts.check_validated_signatures import check
-from tools.production_db import ReleaseRejected, build_release, verify_release
+from scripts.check_cve_source_tree import check
+from tools.production_db import ReleaseRejected, review_cases
 
 ROOT = Path(__file__).resolve().parents[1]
 SHA = re.compile(r"[a-f0-9]{64}\Z")
@@ -26,45 +26,61 @@ SHA = re.compile(r"[a-f0-9]{64}\Z")
 def run(root: Path, scanner: Path, approved_host: str) -> dict:
     cves = check(root)
     if not cves:
-        return {"status": "EMPTY_SOURCE_TREE", "cve_count": 0}
+        return {
+            "status": "NO_REVIEWED_EVIDENCE",
+            "reviewed_cve_count": 0,
+            "cve_accuracy": "NOT_ESTABLISHED"
+        }
     try:
         lock = json.loads(
             (root / "release" / "reviewed-corpus.lock.json").read_text())
     except (OSError, ValueError) as exc:
         raise ReleaseRejected(
             "validated CVEs require a reviewed corpus lock") from exc
-    url = lock.get("archive_url")
-    digest = lock.get("archive_sha256")
-    if (lock.get("schema_version") != 2 or not isinstance(url, str) or
-            not isinstance(digest, str) or not SHA.fullmatch(digest)):
+    entries = lock.get("cases")
+    if lock.get("schema_version") != 3 or not isinstance(entries, dict):
         raise ReleaseRejected(
-            "validated CVEs require immutable HTTPS corpus URL and SHA")
+            "reviewed corpus lock schema must be 3 with per-CVE cases")
     if not approved_host:
         raise ReleaseRejected(
             "reviewed corpus host must be configured by repository admins")
+    if set(entries) != set(cves):
+        raise ReleaseRejected(
+            "corpus lock must bind exactly the reviewed Git CVEs")
     with tempfile.TemporaryDirectory(
             prefix="vulnimprint-native-admission-") as temp:
         work = Path(temp)
-        artifact_dir = work / "download"
-        artifact_dir.mkdir()
+        cases = work / "cases"
+        cases.mkdir()
+        downloads = work / "downloads"
+        downloads.mkdir()
         from scripts.fetch_reviewed_corpus import fetch
-        archive = artifact_dir / "reviewed_cases.tar.gz"
-        try:
-            fetch(url, digest, approved_host, archive)
-        except (OSError, ValueError) as exc:
-            raise ReleaseRejected("cannot download verified corpus") from exc
-        extracted = work / "cases"
-        try:
-            unpack(archive, digest, extracted)
-        except (OSError, ValueError, tarfile.TarError) as exc:
-            raise ReleaseRejected('reviewed corpus integrity failed') from exc
-        out = work / "database"
-        build_release(extracted,
-                      out,
-                      scanner,
-                      min_cves=len(cves),
-                      signatures=root / "signatures" / "validated")
-        verify_release(out, scanner=scanner)
+        for cve in cves:
+            entry = entries[cve]
+            if not isinstance(entry, dict) or set(entry) != {
+                    "archive_url", "archive_sha256"
+            }:
+                raise ReleaseRejected(f"{cve}: invalid pinned case descriptor")
+            url = entry["archive_url"]
+            digest = entry["archive_sha256"]
+            if (not isinstance(url, str) or not isinstance(digest, str) or
+                    not SHA.fullmatch(digest)):
+                raise ReleaseRejected(
+                    f"{cve}: immutable HTTPS URL and SHA required")
+            archive = downloads / f"{cve}.tar.gz"
+            try:
+                fetch(url, digest, approved_host, archive)
+                # One archive contains one CVE case's canonical files and
+                # immutable specimens, relative to that case's root.
+                unpack(archive, digest, cases / cve)
+            except (OSError, ValueError, tarfile.TarError) as exc:
+                raise ReleaseRejected(
+                    f"{cve}: independently reviewed corpus unavailable or invalid"
+                ) from exc
+        review_cases(cases,
+                     scanner,
+                     min_cves=len(cves),
+                     signatures=root / "signatures")
     return {"status": "PASS", "cve_count": len(cves)}
 
 

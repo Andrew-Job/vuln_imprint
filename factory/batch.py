@@ -6,7 +6,6 @@ native YARA-X oracle failed to run. Untrusted source builds require sandboxed CI
 from __future__ import annotations
 import hashlib
 import json
-import os
 import re
 import subprocess
 import tarfile
@@ -81,7 +80,7 @@ def batch_run(catalog: Path,
               output: Path,
               store: Path | None = None,
               compile_native=True,
-              include_experimental=False) -> dict:
+              channel='test') -> dict:
     catalog = Path(catalog).resolve()
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -93,8 +92,6 @@ def batch_run(catalog: Path,
     entries = []
     cache = {}
     completed = []
-    os.environ.setdefault('VULNIMPRINT_GIT_MIRROR_CACHE',
-                          str(output / 'git-mirrors'))
     for source in files:
         cve = source.stem
         result = {'cve': cve, 'manifest': str(source), 'status': 'NOT_STARTED'}
@@ -110,15 +107,18 @@ def batch_run(catalog: Path,
             continue
         try:
             target = output / 'cases' / cve
-            report = run(locked, target, store=store)
-            result.update(status=report['status'],
-                          yara_x=report['yara_x_validation']['status'],
-                          metrics=report['metrics'],
-                          selected_rules=len(
-                              json.loads(
-                                  (target / 'pack.json').read_text())['rules']),
-                          report=str(
-                              (target / 'report.json').relative_to(output)))
+            report = run(locked,
+                         target,
+                         store=store,
+                         mirror_cache=output / "git-mirrors")
+            result.update(
+                status=report['status'],
+                yara_x=report['yara_x_validation']['status'],
+                metrics=report['metrics'],
+                selected_rules=sum(
+                    len(record['rules']) for record in json.loads((
+                        target / 'pack.json').read_text())['records']),
+                report=str((target / 'report.json').relative_to(output)))
             if result['status'] not in ('NO_SIGNATURE', 'QUALITY_REJECTED'):
                 completed.append(target)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
@@ -130,11 +130,9 @@ def batch_run(catalog: Path,
         (output / 'batch-status.partial.json'
         ).write_text(json.dumps({'entries': entries}, indent=2) + '\n')
     dbdir = output / 'database'
-    dbindex = merge_packs(completed,
-                          dbdir,
-                          allow_experimental=include_experimental)
+    dbindex = merge_packs(completed, dbdir, channel=channel)
     native = {'status': 'NOT_ATTEMPTED'}
-    if compile_native and dbindex['included_cve_count']:
+    if compile_native and dbindex['cve_count']:
         try:
             native = {'status': 'PASS', **compile_database(dbdir)}
         except (ImportError, RuntimeError, ValueError, OSError) as exc:
@@ -143,7 +141,7 @@ def batch_run(catalog: Path,
                 'error': f'{type(exc).__name__}: {exc}'
             }
     elif compile_native:
-        native = {'status': 'NO_ADMITTED_PACKS'}
+        native = {'status': 'NO_DATABASE_RECORDS'}
     report = {
         'schema_version':
             1,
@@ -161,7 +159,9 @@ def batch_run(catalog: Path,
                 x for x in entries if x['status'] == 'VALIDATED_ON_GIVEN_CORPUS'
             ]),
         'included_cves':
-            dbindex['included_cve_count'],
+            dbindex['cve_count'],
+        'included_records':
+            dbindex['record_count'],
         'native_database':
             native,
         'entries':

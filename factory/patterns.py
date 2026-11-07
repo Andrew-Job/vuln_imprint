@@ -51,9 +51,17 @@ class Pattern:
 
     def search(self, regions: Sequence[tuple[int, bytes]], first_only=False):
         start, atom = self.atom()
-        if len(atom) < 5:
-            return []
         results = []
+        if len(atom) < 5:
+            # A short fixed run is an optimization limit, not a non-match.
+            # Scan every possible position rather than losing valid evidence.
+            for base, data in regions:
+                for loc in range(max(0, len(data) - len(self.data) + 1)):
+                    if self.matches_at(data, loc):
+                        results.append(base + loc)
+                        if first_only:
+                            return results
+            return results
         for base, data in regions:
             at = 0
             while True:

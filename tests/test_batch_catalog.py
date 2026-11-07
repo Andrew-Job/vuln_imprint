@@ -69,7 +69,7 @@ def test_batch_records_acquisition_failures_without_signature(
     assert report['requested_cves'] == 2
     assert report['completed_pipeline_cves'] == 0
     assert report['strictly_validated_cves'] == 0
-    assert report['native_database']['status'] == 'NO_ADMITTED_PACKS'
+    assert report['native_database']['status'] == 'NO_DATABASE_RECORDS'
     assert all(
         x['status'] == 'BLOCKED_SOURCE_ACQUISITION' for x in report['entries'])
     assert (tmp_path / 'out/batch-report.json').exists()

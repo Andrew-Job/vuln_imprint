@@ -1,42 +1,132 @@
-# CVE signature source and compiled database
+# CVE source records and compiled database
 
-`signatures/validated/CVE-YYYY-NNNN/` contains the three reviewed source files
-`pack.json`, `rules-exec.yar` and `reviewed-evidence.json`. Only entries in
-this directory are compiled for production. `signatures/candidates/` contains
-unapproved research and is never a database input. Multiple machine patterns
-for one CVE are alternatives, not multiple independent vulnerabilities.
+## Source model
 
-`tools.production_db build` is the **admission** validator and needs the
-independent specimen corpus and real native scanner. `tools.production_db
-assemble` is the **release** compiler: it consumes the entire Git-validated
-source tree after technical admission and builds one `.yarc` with the pinned
-native YARA-X C API. It has no per-CVE selection argument.
+`signatures/CVE-YYYY-NNNN.../` is the sole authoring tree. Each CVE can have
+`research.json` without a machine record, or a schema-version-3 `pack.json`
+containing one or more independent DB records. `rules-exec.yar` is the
+canonical YARA-X source derived from the pack. One record belongs to exactly
+one CVE; patterns shared with another CVE are duplicated in a separate record.
 
-The compiled output contains:
-
-```text
-database.yar         combined reviewed YARA source
-database.yarc        compiled native YARA-X rules
-index.json           unique CVE IDs, pattern counts and evidence profiles
-quality-report.json  reviewed-source metadata; not a fresh CVE validation
-manifest.json        digests and pinned engine compatibility
-SHA256SUMS           checksums of the database payload
+```json
+{
+  "schema_version": 3,
+  "cve": "CVE-2026-12345",
+  "records": [
+    {
+      "record_id": "VI_0123456789ABCDEF01234567",
+      "channel": "test",
+      "source_type": "manual",
+      "platform": {
+        "os": "linux", "format": "ELF", "arch": "x86-64",
+        "bits": 64, "abi": "sysv"
+      },
+      "rules": [{
+        "id": "CVE-2026-12345-pattern-0",
+        "hex": "90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90",
+        "length": 28,
+        "fixed_bytes": 28
+      }]
+    }
+  ]
+}
 ```
 
-The index records observed compiler identity where it is included in the
-reviewed evidence. It is not a claim of universal compiler coverage.
+The example bytes are synthetic, **not** a CVE detector. Each `record_id`
+is globally unique, stable and deterministic. Its `record_sha256` covers the
+canonical content of that record independently of siblings in the same CVE.
+Each pattern has validated syntax, length and fixed-byte metadata.
 
-These files are included directly under
-`vulnimprint/share/vulnimprint/db/` in the **one** public application archive.
-The installed launcher checks the four payload files listed in the bundled
-`SHA256SUMS` (`database.yar`, `database.yarc`, `index.json`, and
-`quality-report.json`) before every scan. The `manifest.json` and database
-checksum list are covered by verification of the release archive before
-installation, not by this launcher check. Updating the application means
-downloading and verifying a new complete release. There is no
-standalone database archive, updater, or version-store selection path.
+There are exactly two inclusion channels:
 
-New formats and architectures will require corresponding binary loaders,
-versioned database profiles, runtime integration tests and independent CVE
-validation. A change to profile support must not silently broaden the
-existing Linux ELF64 x86-64 claim.
+| Channel | Test database | Production database |
+|---|---|---|
+| `test` | included | excluded |
+| `production` | included | included |
+
+Channel assignment makes no claim about accuracy, exploitability, compiler
+coverage or the absence of false positives. New manual records default to
+`test`. A research-only CVE creates no machine rules.
+
+## Current source catalog
+
+| CVE | Records | Patterns |
+|---|---:|---:|
+| `CVE-2026-22695` | 1 | 1 |
+| `CVE-2026-22801` | 1 | 4 |
+| `CVE-2026-25646` | 1 | 5 |
+| `CVE-2026-33416` | 1 | 10 |
+| `CVE-2026-34757` | 1 | 5 |
+| `CVE-2026-46675` (research only) | 0 | 0 |
+| **Total: 6 CVEs** | **5** | **25** |
+
+All five machine records have the `production` inclusion channel. Their
+independent CVE-detection accuracy has **not** been established by reviewed
+affected/fixed/backport controls. The recorded research results and machine
+anchors are in `docs/research/libpng-elf64-x86_64/`; that evidence must not be
+interpreted as an independent, complete CVE accuracy validation.
+
+## Review and assembly
+
+Reviewed evidence schema 3 binds the exact `record_id` and `record_sha256`,
+explicit `sample_ids`, training lineages and controls for each record. A
+sibling record's finding does not satisfy a positive or negative control.
+The reviewer evaluates affected, fixed, backport and unrelated examples
+within each claimed compiler profile. Existing production records without
+reviewed evidence remain selectable for assembly; acceptance of newly changed
+records is separately reviewed.
+
+```bash
+python -m tools.production_db review --cases CASES \
+  --scanner build/scanner/vulnimprint-scan --signatures signatures
+
+python -m tools.production_db assemble --signatures signatures \
+  --channel test --output build/db-test \
+  --scanner build/scanner/vulnimprint-scan
+python -m tools.production_db verify --database build/db-test \
+  --scanner build/scanner/vulnimprint-scan
+
+python -m tools.production_db assemble --signatures signatures \
+  --channel production --output build/db-production \
+  --scanner build/scanner/vulnimprint-scan
+python -m tools.production_db verify --database build/db-production \
+  --scanner build/scanner/vulnimprint-scan
+```
+
+`review` validates independent evidence without generating a database.
+`assemble` is the only builder, reads Git-tracked source and compiles with
+native YARA-X. `verify` checks the built artifacts. Source structure and
+successful compilation alone do not validate CVE semantics.
+
+The database format version is **1**; `pack.json` schema version is **3**.
+Database artifacts are:
+
+| Artifact | Purpose |
+|---|---|
+| `database.yar` | Canonical YARA-X source |
+| `database.yarc` | Serialized native YARA-X rules |
+| `index.json` | CVEs, channels, record IDs/hashes and separate counts |
+| `database-report.json` | Database composition summary |
+| `manifest.json` | Engine compatibility and artifact digests |
+| `SHA256SUMS` | Database payload checksums |
+
+A match identifies its CVE, `record_id`, pattern and file offset; `cve_count`
+is the number of unique CVEs with findings. The release ships a consistent
+scanner and database under `vulnimprint/share/vulnimprint/db/`, verified by
+the installed launcher. There is no separately supported database updater.
+
+## Manual authoring
+
+```bash
+python -m tools.manual_rules init \
+  --cve CVE-2026-12345 --record-key variant-a --channel test \
+  --hex 'AA BB CC DD EE FF 00 11 22 33 44 55 66 77 88 99 00 11 22 33 44 55 66 77 88 99 00 11' \
+  --output run/cve-proposals/CVE-2026-12345
+python -m tools.manual_rules lint \
+  --directory run/cve-proposals/CVE-2026-12345
+```
+
+Use a separate stable `--record-key` for each independent record within a
+CVE. The initializer generates `pack.json` and `rules-exec.yar` together.
+Source lint and real YARA-X compilation are mandatory; they do not assert
+that synthetic or newly authored bytes detect a vulnerability.

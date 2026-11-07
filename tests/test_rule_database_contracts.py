@@ -1,44 +1,59 @@
-"""Safety and source-aggregation contracts owned by VulnImprint."""
+"""Safety and CVE-owned source-aggregation contracts."""
 
 import json
-from pathlib import Path
 
 import pytest
 
 from factory.database import load_included_packs, merge_packs
+from factory.signature_identity import new_record_id
 from factory.yara_engine import source_from_packs
 
 
-def _pack(cve: str, *, hex_pattern: str = "48 83 EC 28") -> dict:
+def _pack(cve: str,
+          *,
+          hex_pattern: str = "48 83 EC 28",
+          key: str = "default") -> dict:
     return {
-        "cve": cve,
-        "status": "CANDIDATE_ONLY",
-        "platform": {
-            "format": "ELF",
-            "arch": "x86-64",
-            "bits": 64
-        },
-        "rules": [{
-            "hex": hex_pattern
+        "schema_version":
+            3,
+        "cve":
+            cve,
+        "records": [{
+            "record_id": new_record_id(cve, key),
+            "channel": "test",
+            "source_type": "manual",
+            "platform": {
+                "format": "ELF",
+                "arch": "x86-64",
+                "bits": 64
+            },
+            "rules": [{
+                "id": f"{cve}-pattern-0",
+                "hex": hex_pattern
+            }],
         }],
     }
 
 
-def test_rule_aggregation_is_deterministic_and_preserves_cve_identity():
+def test_rule_aggregation_is_deterministic_and_preserves_cve_ownership():
     first = _pack("CVE-2025-10001")
     second = _pack("CVE-2026-20002", hex_pattern="90 90 CC 90")
     merged = source_from_packs([first, second])
     assert merged == source_from_packs([first, second])
-    assert merged.count("\nrule ") == 1
+    assert merged.count("rule VI_") == 2
     assert merged.count("    any of them") == 2
-    assert merged.index("CVE-2025-10001") < merged.index("CVE-2026-20002")
+    assert 'cve = "CVE-2025-10001"' in merged
+    assert 'cve = "CVE-2026-20002"' in merged
+    assert "cves =" not in merged
 
 
 @pytest.mark.parametrize("mutation", [
-    lambda p: p.update(cve='CVE-2025-12345" } rule injected { condition: true }'
-                      ),
-    lambda p: p.update(status='CANDIDATE_ONLY"\n condition: true'),
-    lambda p: p["rules"][0].update(hex='48 8B } condition: true'),
+    lambda pack: pack.update(
+        cve='CVE-2025-12345" } rule injected { condition: true }'),
+    lambda pack: pack["records"][0].update(channel=
+                                           'production"\n condition: true'),
+    lambda pack: pack["records"][0]["rules"][0].update(
+        hex='48 8B } condition: true'),
 ])
 def test_manifest_fields_cannot_inject_yara_rules(mutation):
     candidate = _pack("CVE-2025-12345")
@@ -47,9 +62,10 @@ def test_manifest_fields_cannot_inject_yara_rules(mutation):
         source_from_packs([candidate])
 
 
-def test_duplicate_cve_rule_identifiers_are_rejected():
+def test_duplicate_record_identifiers_are_rejected():
     pack = _pack("CVE-2025-12345")
-    with pytest.raises(ValueError, match="duplicate rule"):
+    with pytest.raises(ValueError,
+                       match="duplicate database record identifier"):
         source_from_packs([pack, pack])
 
 
@@ -60,7 +76,7 @@ def test_index_read_only_access_to_snapshot_with_cve_binding(tmp_path):
     (case / "pack.json").write_text(json.dumps(pack))
     (case / "rules-exec.yar").write_text(source_from_packs([pack]))
     db = tmp_path / "db"
-    merge_packs([case], db, allow_experimental=True)
+    merge_packs([case], db, channel="test")
     assert load_included_packs(db) == [pack]
 
     index_path = db / "index.json"

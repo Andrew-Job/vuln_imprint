@@ -13,8 +13,9 @@ absence of a match is not proof of safety.
   reports with file offsets, CVE identifiers and explicit scan errors.
 - **Signature Factory**: Python 3.12+, pinned source acquisition, GCC/Clang
   build profiles, disassembly, candidate masks and independent validation.
-- **Production database**: every technically approved CVE under
-  `signatures/validated/` is combined into one compiled YARA-X database.
+- **Versioned signature database**: CVE-owned DB records under `signatures/`
+  are combined into a compiled YARA-X database. Each record has one owning
+  CVE and one of two database channels: `test` or `production`.
 
 **Current scan target:** Linux ELF64, little-endian x86-64. Unsupported or
 invalid inputs fail explicitly, including with the diagnostic
@@ -24,10 +25,21 @@ formats and CPUs, but these are not implemented scanner capabilities yet.
 The scanner reports `file` as display-oriented UTF-8 and `file_bytes_hex`
 as the lossless encoding of the Linux pathname bytes.
 
+## Database review and assembly
+
+When independent evidence is available, it binds `record_id`, canonical
+`record_sha256` and explicit `sample_ids` to each reviewed record. The
+`python -m tools.production_db review` command validates this evidence
+without producing a database. The only database builder is
+`python -m tools.production_db assemble`, which reads Git-tracked CVE records.
+At present no production CVE has independent reviewed evidence; source
+validation and successful YARA-X compilation must not be read as proof of
+CVE detection accuracy.
+
 ## Distribution and verification
 
 GitHub Releases distributes one application tarball containing the native
-scanner, bundled YARA-X shared library, compiled database, index, checksum
+scanner with statically linked YARA-X, compiled database, index, checksum
 manifests and license notices. The release also publishes three companion
 assets: `SBOM.spdx.json`, `release-contents.json` and `SHA256SUMS`. There is
 no separately installed database or automatic DB updater: install a new
@@ -48,7 +60,7 @@ tar -xzf vulnimprint-linux-x86_64.tar.gz
 A `SHA256SUMS` file by itself does not authenticate its publisher. The installed
 launcher checks the embedded database hashes before each scan. End users
 need no Python, Cargo, or Factory installation. The bundle is dynamically
-linked to the Linux system runtime; current release builds use Ubuntu 22.04
+linked to the Linux system runtime; current release builds use Ubuntu 24.04
 x86-64 and require a compatible glibc/OpenSSL environment. Compatibility
 with arbitrary Linux distributions is not promised.
 
@@ -63,41 +75,35 @@ bash scripts/build_yarax_python.sh
 make test-native
 ```
 
-The native build obtains pinned Git submodules and requires the actual C++
-YARA-X C API; it has no fallback matcher. See [Development](docs/DEVELOPMENT.md)
-and [Native build](docs/YARAX_NATIVE_BUILD.md).
+The native build obtains pinned Git submodules and compiles the official
+YARA-X C API with Rust/Cargo. It has no fallback matcher. See
+[Development](docs/DEVELOPMENT.md) for prerequisites and real-engine checks.
 
-## CVE research and approval
+## CVE research and database records
 
-The production source of truth is `signatures/validated/`, with exactly three
-files per approved CVE: `pack.json`, `rules-exec.yar` and
-`reviewed-evidence.json`. Changes are accepted through reviewed PRs after
-independent affected/fixed/backport/unrelated native validation. Every
-approved CVE automatically enters the next compiled release database.
-Multiple machine patterns for the same CVE represent alternatives.
+The authoritative source is `signatures/`. CVE is the authoring and
+maintenance unit. Each CVE pack may contain multiple independent DB records;
+each record belongs to exactly one CVE and has a stable `record_id`. If the
+same byte pattern applies to another CVE, it is duplicated into a separate
+record under that CVE. This intentional duplication allows records to be
+edited and maintained independently.
 
-The included libpng dossier in `signatures/candidates/` contains five
-**unapproved** research candidates. Its source/anchor checks are not evidence
-of native YARA-X affected/fixed/backport accuracy. No candidate has been
-promoted merely because its `.yar` syntax is valid. An empty Git-validated
-source tree correctly blocks a production release. Candidates can only be
-approved after the actual independent corpus and technical review satisfy
-the [Admission contract](docs/RELEASE_CONTRACT.md).
+Only two database channels exist: `test` and `production`. Test database
+assembly includes both channels; production releases include only production
+records. The channel is an inclusion target, not a correctness grade. All five
+current machine-record CVEs (25 patterns) are assigned to `production`; the
+sixth CVE remains research-only with no machine record. These assignments do
+not assert that the detectors have independently verified CVE accuracy or exploitability.
 
-Manual mask edits are welcome and must be revalidated. The Factory experimental
-matrix includes GCC 11/12 and Clang 14/15 at `-O2` and `-O3`; tested profiles
-and toolchain digests are preserved as evidence rather than universal claims.
-A researcher may start from:
+A pack uses schema version 3 and stores one top-level `cve` with a `records`
+array. Each YARA rule reports exactly one CVE and one record ID. Scanner output
+counts unique CVEs separately from record matches and pattern hits.
 
-```bash
-python3 -m tools.manual_rules init \
-  --cve CVE-2022-37434 \
-  --hex 'AA BB CC DD EE FF 00 11 22 33 44 55 66 77 88 99 00 11 22 33 44 55 66 77 88 99 00 11' \
-  --output run/cve-proposals/CVE-2022-37434
-python3 -m tools.manual_rules lint --directory run/cve-proposals/CVE-2022-37434
-```
+To create a manual record, use `tools.manual_rules init`; new records default
+to the `test` channel. Use a distinct `--record-key` for additional records
+under the same CVE. Source lint, native compilation, and release integrity are mandatory.
+Evidence validation is record-specific and does not change record channels.
 
-The bytes are illustrative syntax only, **not** a detector for the named CVE.
 For automated research, see `scripts/create_catalog.py`, `cli.py batch` and
 [Toolchain matrix](docs/TOOLCHAIN_MATRIX.md).
 
@@ -106,8 +112,8 @@ For automated research, see `scripts/create_catalog.py`, `cli.py batch` and
 ```text
 scanner/        native scanner and ELFIO adapter
 factory/        binary evidence and candidate generation
-signatures/     reviewed production rules and isolated research candidates
-tools/          rule admission, complete DB assembly and release packaging
+signatures/     Git-tracked CVE packs and independently owned DB records
+tools/          CVE source validation, complete DB assembly and release packaging
 scripts/        native build, checks and research helpers
 tests/          Factory behavior tests
 tests_release/  first-party DB and packaging contract tests

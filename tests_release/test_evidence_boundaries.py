@@ -65,12 +65,7 @@ def test_git_acquisition_rejects_untrusted_transports(tmp_path, url):
         get_git_source({'git': url, 'commit': 'a' * 40}, tmp_path)
 
 
-def test_forged_compiler_provenance_does_not_claim_a_lane(monkeypatch):
-
-    def cannot_probe(*args, **kwargs):
-        raise production_db.ToolchainMismatch('compiler not present')
-
-    monkeypatch.setattr(production_db, 'probe_compiler', cannot_probe)
+def test_build_provenance_identity_must_bind_exact_reviewed_sample():
     row = {
         'binary_kind': 'source_built_elf',
         'artifact_role': 'host_0',
@@ -108,9 +103,11 @@ def test_forged_compiler_provenance_does_not_claim_a_lane(monkeypatch):
             'commands': [['/usr/bin/gcc-11', '-O2', 'main.c', '-o', 'host_0']]
         }
     }
-    with pytest.raises(production_db.ReleaseRejected,
-                       match='independently remeasured'):
-        production_db.validate_reviewed_toolchain(row, 'CVE-2099-12345')
+    assert production_db.validate_reviewed_toolchain(
+        row, 'CVE-2099-12345')['binary_sha256'] == 'c' * 64
+    tampered = {**row, 'sha256': 'd' * 64}
+    with pytest.raises(production_db.ReleaseRejected, match='bind the sample'):
+        production_db.validate_reviewed_toolchain(tampered, 'CVE-2099-12345')
 
 
 def test_static_product_requires_cryptographic_upstream_proof(tmp_path):

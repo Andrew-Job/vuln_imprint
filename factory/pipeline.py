@@ -278,7 +278,10 @@ def run_archive(*cmd):
                           text=True).stdout
 
 
-def _prepare(manifest: dict, root: Path, work: Path):
+def _prepare(manifest: dict,
+             root: Path,
+             work: Path,
+             mirror_cache: Path | None = None):
     """Optional source-build recipes; suitable for gcc/clang cross/target profiles.
 
     Each command receives {workspace} and {source_dir} placeholders, no shell.
@@ -336,7 +339,9 @@ def _prepare(manifest: dict, root: Path, work: Path):
             shutil.rmtree(folder)
         folder.mkdir(parents=True)
         if 'git' in job['source']:
-            source_dir, source_info = get_git_source(job['source'], work)
+            source_dir, source_info = get_git_source(job['source'],
+                                                     work,
+                                                     mirror_cache=mirror_cache)
         else:
             archive = acquire(job['source'], root, work)
             source_dir = folder / 'source'
@@ -380,7 +385,8 @@ def _prepare(manifest: dict, root: Path, work: Path):
         if source_info['type'] == 'git':
             # The compiler must not modify the pinned upstream checkout while
             # manufacturing an apparently valid source provenance record.
-            verified_path, verified_source = get_git_source(job['source'], work)
+            verified_path, verified_source = get_git_source(
+                job['source'], work, mirror_cache=mirror_cache)
             if verified_path != source_dir or verified_source != source_info:
                 raise ValueError(
                     f'{jobname}: source checkout changed during build')
@@ -397,7 +403,7 @@ def _prepare(manifest: dict, root: Path, work: Path):
             verify_record(folder, source_info, toolchain)
 
 
-def load_manifest(path: Path, output: Path):
+def load_manifest(path: Path, output: Path, mirror_cache: Path | None = None):
     from .elf import ELF
 
     data = json.loads(path.read_text())
@@ -419,7 +425,7 @@ def load_manifest(path: Path, output: Path):
     roots = path.parent
     work = output / 'work'
     work.mkdir(parents=True, exist_ok=True)
-    _prepare(data, roots, work)
+    _prepare(data, roots, work, mirror_cache=mirror_cache)
     samples = []
     ids = set()
     for row in data['samples']:
@@ -623,15 +629,40 @@ def _validate(samples, selected):
 
 def validate_yara_x(cve: str, patterns: list[Pattern], samples: list[Sample]):
     """Compare native YARA-X with independent reference matcher on ELF code ranges."""
+    if not patterns:
+        return {
+            'status': 'NO_PATTERNS',
+            'message': 'No machine patterns to compile',
+            'mismatches': []
+        }
     try:
+        from .signature_identity import new_record_id
         source = source_from_packs([{
-            'cve': cve,
-            'platform': {
-                'format': 'ELF'
-            },
-            'rules': [{
-                'hex': p.to_hex()
-            } for p in patterns]
+            'schema_version':
+                3,
+            'cve':
+                cve,
+            'records': [{
+                'record_id':
+                    new_record_id(cve, 'factory-validation'),
+                'channel':
+                    'test',
+                'source_type':
+                    'factory',
+                'platform': {
+                    'os': 'linux',
+                    'format': 'ELF',
+                    'arch': 'x86-64',
+                    'bits': 64,
+                    'abi': 'sysv'
+                },
+                'rules': [{
+                    'id': f'{cve}-pattern-{index}',
+                    'hex': pattern.to_hex(),
+                    'length': len(pattern.data),
+                    'fixed_bytes': pattern.fixed
+                } for index, pattern in enumerate(patterns)],
+            }],
         }])
         scanner = YaraXScanner.compile(source)
     except RuntimeError as e:
@@ -676,9 +707,12 @@ def validate_yara_x(cve: str, patterns: list[Pattern], samples: list[Sample]):
     }
 
 
-def run(manifest: Path, output: Path, store: Path | None = None):
+def run(manifest: Path,
+        output: Path,
+        store: Path | None = None,
+        mirror_cache: Path | None = None):
     output.mkdir(parents=True, exist_ok=True)
-    spec, samples = load_manifest(manifest, output)
+    spec, samples = load_manifest(manifest, output, mirror_cache=mirror_cache)
     stored = []
     if store:
         cas = ArtifactStore(store)
@@ -846,26 +880,35 @@ def run(manifest: Path, output: Path, store: Path | None = None):
             'max_fixed_atom': len(c.pattern.atom()[1]),
             'instructions': c.instructions
         })
-    pack = {
-        'schema_version': 1,
-        'cve': spec['cve'],
-        'platform': {
-            'os': 'linux',
-            'format': 'ELF',
-            'bits': 64,
-            'arch': 'x86-64',
-            'abi': 'sysv'
-        },
+    from .signature_identity import new_record_id
+    platform = {
+        'os': 'linux',
+        'format': 'ELF',
+        'bits': 64,
+        'arch': 'x86-64',
+        'abi': 'sysv'
+    }
+    record_key = spec.get('record_key', 'default')
+    channel = spec.get('channel', 'test')
+    record = {
+        'record_id': new_record_id(spec['cve'], record_key),
+        'channel': channel,
+        'source_type': 'factory',
+        'platform': platform,
         'rules': out_rules,
-        'status': status,
+        'supported_profiles': spec.get('supported_profiles', []),
         'scope': 'affected_family_evidence',
         'hints': spec.get('hints', {}),
         'notes': 'Not proof of reachability or absence of backports.'
     }
     pack_path = output / 'pack.json'
-    pack_path.write_text(json.dumps(pack, indent=2, sort_keys=True) + '\n')
-    (output / 'rules-exec.yar').write_text(
-        source_from_packs([pack]) if patterns else '// No admissible rule\n')
+    if out_rules:
+        pack = {'schema_version': 3, 'cve': spec['cve'], 'records': [record]}
+        pack_path.write_text(json.dumps(pack, indent=2, sort_keys=True) + '\n')
+        (output / 'rules-exec.yar').write_text(source_from_packs([pack]))
+    else:
+        pack_path.unlink(missing_ok=True)
+        (output / 'rules-exec.yar').write_text('// No machine record\n')
     counts = {
         split:
             dict(
@@ -909,11 +952,17 @@ def reference_scan(pack: Path, target: Path):
 
     p = json.loads(pack.read_text())
     elf = ELF(target)
-    rules = [Pattern.from_hex(row['hex']) for row in p['rules']]
     out = []
-    for i, pat in enumerate(rules):
-        for at in pat.search(elf.executable_ranges()):
-            out.append({'rule': p['rules'][i]['id'], 'offset': at})
+    for record in p['records']:
+        for row in record['rules']:
+            pattern = Pattern.from_hex(row['hex'])
+            for offset in pattern.search(elf.executable_ranges()):
+                out.append({
+                    'cve': p['cve'],
+                    'record_id': record['record_id'],
+                    'pattern': row['id'],
+                    'offset': offset,
+                })
     return {
         'cve': p['cve'],
         'target': str(target),

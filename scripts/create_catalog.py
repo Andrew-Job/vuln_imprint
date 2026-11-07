@@ -2,7 +2,7 @@
 """Generate experimental CVE recipes from fork-local JSON input records.
 
 This tool accepts contributor-supplied records; it does not admit candidates
-into the production database. Research in signatures/candidates/ is allowed
+into the production database. Research proposals belong in workspaces and contributor branches
 but excluded from releases. The batch pipeline pins source tags to commits.
 """
 from __future__ import annotations

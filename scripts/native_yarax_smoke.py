@@ -20,16 +20,31 @@ import tempfile
 # Unusual marker chosen to avoid coincidental matches in compiler runtime code.
 MARKER = 'DE AD 51 61 C3 40 28 7F 92 12 83 4A 18 6F A5 3B'
 HEX_C = ', '.join('0x' + b.lower() for b in MARKER.split())
-RULE = '''rule NATIVE_C_API_INTEGRATION {
+RULE = '''rule VI_111111111111111111111111 {
   meta:
     cve = "CVE-2099-90001"
-    evidence = "TEST_ONLY"
   strings:
     $marker = { %s }
   condition:
     any of them
 }
-''' % MARKER
+rule VI_333333333333333333333333 {
+  meta:
+    cve = "CVE-2099-90001"
+  strings:
+    $marker = { %s }
+  condition:
+    any of them
+}
+rule VI_222222222222222222222222 {
+  meta:
+    cve = "CVE-2099-90002"
+  strings:
+    $marker = { %s }
+  condition:
+    any of them
+}
+''' % (MARKER, MARKER, MARKER)
 
 
 def run(*cmd: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -107,24 +122,33 @@ int main(void) { return vulnerable_looking_data[0] == 0; }
         verified = json.loads(
             run(str(scanner), 'verify', '--compiled', str(compiled)).stdout)
         assert verified['engine'] == 'yara-x' and verified[
-            'rules'] == 1, verified
+            'rules'] == 3, verified
         assert verified['db_sha256'] == hashlib.sha256(
             compiled.read_bytes()).hexdigest(), verified
 
         affected = scan(scanner, '--compiled', str(compiled), '--json',
                         str(elf['affected']))
-        affected_hits = matches(affected, 1)
-        hit = affected_hits[0]
-        assert hit['cve'] == 'CVE-2099-90001', hit
-        assert hit['pattern'].lstrip(
-            '$') == 'marker' and hit['rule'] == 'NATIVE_C_API_INTEGRATION', hit
-        assert hit['length'] == len(
-            MARKER.split()) and hit['executable'] is True, hit
-        file_offset = int(hit['file_offset'], 16)
-        assert elf['affected'].read_bytes()[file_offset:file_offset +
-                                            hit['length']] == bytes.fromhex(
-                                                MARKER), hit
-        assert hit['virtual_address'] is not None, hit
+        affected_hits = matches(affected, 3)
+        assert {hit['cve'] for hit in affected_hits
+               } == {'CVE-2099-90001', 'CVE-2099-90002'}, affected_hits
+        assert {hit['record_id'] for hit in affected_hits} == {
+            'VI_111111111111111111111111', 'VI_222222222222222222222222',
+            'VI_333333333333333333333333'
+        }, affected_hits
+        assert affected['cve_count'] == 2 and affected[
+            'pattern_hits'] == 3, affected
+        assert affected['unique_cves'] == ['CVE-2099-90001',
+                                           'CVE-2099-90002'], affected
+        for hit in affected_hits:
+            assert hit['pattern'].lstrip('$') == 'marker', hit
+            assert hit['rule'] == hit['record_id'], hit
+            assert hit['length'] == len(
+                MARKER.split()) and hit['executable'] is True, hit
+            file_offset = int(hit['file_offset'], 16)
+            assert elf['affected'].read_bytes()[file_offset:file_offset +
+                                                hit['length']] == bytes.fromhex(
+                                                    MARKER), hit
+            assert hit['virtual_address'] is not None, hit
 
         # The YARA-X engine suppresses offsets at its own per-pattern limit.
         # We must signal potentially incomplete reports, even when the
@@ -142,13 +166,33 @@ int main(void) { return vulnerable_looking_data[0] == 0; }
         capped_report = json.loads(capped.stdout)
         assert len(capped_report['results']) == 1, capped_report
         assert capped_report['results'][0]['truncated'] is True, capped_report
-        assert len(capped_report['results'][0]['matches']) == 1, capped_report
+        assert len(capped_report['results'][0]['matches']) == 3, capped_report
 
         source_hits = matches(
             scan(scanner, '--rules', str(rules), '--json',
-                 str(elf['affected'])), 1)
-        assert source_hits[0]['file_offset'] == hit['file_offset'], (
-            source_hits, hit)
+                 str(elf['affected'])), 3)
+        assert {item['file_offset'] for item in source_hits
+               } == {item['file_offset'] for item in affected_hits
+                    }, (source_hits, affected_hits)
+
+        # User-supplied rules without CVE metadata must not fabricate CVE or
+        # VulnImprint record identities.
+        custom_rules = tmp / 'custom.yar'
+        custom_rules.write_text('rule CUSTOM_RULE {\n'
+                                '  strings:\n'
+                                f'    $marker = {{ {MARKER} }}\n'
+                                '  condition:\n'
+                                '    any of them\n'
+                                '}\n')
+        custom_report = scan(scanner, '--rules', str(custom_rules), '--json',
+                             str(elf['affected']))
+        custom_hits = matches(custom_report, 1)
+        assert custom_hits[0]['cve'] is None, custom_hits
+        assert custom_hits[0]['record_id'] is None, custom_hits
+        assert custom_hits[0]['rule'] == 'CUSTOM_RULE', custom_hits
+        assert custom_report['cve_count'] == 0, custom_report
+        assert custom_report['unique_cves'] == [], custom_report
+
         matches(
             scan(scanner, '--compiled', str(compiled), '--json',
                  str(elf['fixed'])), 0)
@@ -207,20 +251,27 @@ int main(void) { return vulnerable_looking_data[0] == 0; }
                  str(elf['data_only'])), 0)
         rodata_hits = matches(
             scan(scanner, '--compiled', str(compiled), '--all-sections',
-                 '--json', str(elf['data_only'])), 1)
-        assert rodata_hits[0]['executable'] is False, rodata_hits
-        assert rodata_hits[0]['virtual_address'] is None, rodata_hits
+                 '--json', str(elf['data_only'])), 3)
+        for item in rodata_hits:
+            assert item['executable'] is False, item
+            assert item['virtual_address'] is None, item
 
         # Full-file scanning must preserve executable classification and the
         # linked ELF virtual address for the same bytes in .text.
         whole_file_hits = matches(
             scan(scanner, '--compiled', str(compiled), '--all-sections',
-                 '--json', str(elf['affected'])), 1)
-        assert whole_file_hits[0]['executable'] is True, whole_file_hits
-        assert whole_file_hits[0]['file_offset'] == hit[
-            'file_offset'], whole_file_hits
-        assert whole_file_hits[0]['virtual_address'] == hit[
-            'virtual_address'], whole_file_hits
+                 '--json', str(elf['affected'])), 3)
+        for item in whole_file_hits:
+            assert item['executable'] is True, item
+        assert {item['record_id'] for item in whole_file_hits
+               } == {item['record_id'] for item in affected_hits
+                    }, whole_file_hits
+        assert {item['file_offset'] for item in whole_file_hits
+               } == {item['file_offset'] for item in affected_hits
+                    }, whole_file_hits
+        assert {item['virtual_address'] for item in whole_file_hits
+               } == {item['virtual_address'] for item in affected_hits
+                    }, whole_file_hits
 
         # Relocatable ET_REL objects contain executable code but have not been
         # assigned a linked virtual address. Do not substitute sh_addr=0.
@@ -229,13 +280,18 @@ int main(void) { return vulnerable_looking_data[0] == 0; }
         for switch in ((), ('--all-sections',)):
             object_hits = matches(
                 scan(scanner, '--compiled', str(compiled), *switch, '--json',
-                     str(relocatable)), 1)
-            assert object_hits[0]['executable'] is True, object_hits
-            assert object_hits[0]['virtual_address'] is None, object_hits
-            obj_offset = int(object_hits[0]['file_offset'], 16)
-            assert relocatable.read_bytes(
-            )[obj_offset:obj_offset +
-              len(MARKER.split())] == bytes.fromhex(MARKER)
+                     str(relocatable)), 3)
+            for item in object_hits:
+                assert item['executable'] is True, item
+                assert item['virtual_address'] is None, item
+            assert {item['record_id'] for item in object_hits
+                   } == {item['record_id'] for item in affected_hits
+                        }, object_hits
+            for item in object_hits:
+                obj_offset = int(item['file_offset'], 16)
+                assert relocatable.read_bytes(
+                )[obj_offset:obj_offset +
+                  len(MARKER.split())] == bytes.fromhex(MARKER), item
 
         collection_dir = tmp / 'collection'
         collection_dir.mkdir()
@@ -249,7 +305,7 @@ int main(void) { return vulnerable_looking_data[0] == 0; }
         scanned = [
             r for r in collection['results'] if r['file'].endswith('/affected')
         ]
-        assert len(scanned) == 1 and len(scanned[0]['matches']) == 1, scanned
+        assert len(scanned) == 1 and len(scanned[0]['matches']) == 3, scanned
         broken = tmp / 'invalid.yarc'
         broken.write_bytes(b'Not a serialized YARA-X DB!')
         invalid = run(str(scanner),
@@ -264,11 +320,11 @@ int main(void) { return vulnerable_looking_data[0] == 0; }
                 {
                     'status': 'PASS',
                     'engine': 'native-yara-x-capi',
-                    'database_rules': 1,
+                    'database_rules': 3,
                     'affected_hits': len(affected_hits),
                     'fixed_hits': 0,
                     'data_only_exec_hits': 0,
-                    'data_only_full_file_hits': 1,
+                    'data_only_full_file_hits': 3,
                     'correct_file_offset': True,
                     'compiled_roundtrip': True,
                     'bad_compiled_database_rejected': True,

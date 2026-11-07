@@ -36,36 +36,33 @@ def test_product_archive_contains_self_contained_layout(tmp_path, monkeypatch):
     scanner = tmp_path / "scanner"
     scanner.write_bytes(b"test executable fixture")
     scanner.chmod(0o755)
-    library = tmp_path / "libyara_x_capi.so"
-    library.write_bytes(b"test library fixture")
     monkeypatch.setattr(package_product, "__file__",
                         str(root / "tools/package_product.py"))
     monkeypatch.setattr(package_product, "verify_release",
                         lambda *a, **k: {"status": "PASS"})
 
     def fake_tool(argv, **kwargs):
+        if argv[0] == "readelf":
+            return SimpleNamespace(returncode=0,
+                                   stdout="Dynamic section: libc.so.6",
+                                   stderr="")
         if argv[0] == "ldd":
-            bundled_lib = Path(argv[1]).parent.parent / "lib/libyara_x_capi.so"
-            return SimpleNamespace(
-                returncode=0,
-                stdout=f"libyara_x_capi.so => {bundled_lib} (0x1)",
-                stderr="",
-            )
+            return SimpleNamespace(returncode=0,
+                                   stdout="libc.so.6 => /lib/libc.so.6",
+                                   stderr="")
         if argv[1] == "verify":
             return SimpleNamespace(returncode=0, stdout="{}", stderr="")
         raise AssertionError(f"unexpected external command: {argv}")
 
     monkeypatch.setattr(package_product.subprocess, "run", fake_tool)
     output = tmp_path / "dist/product.tar.gz"
-    result = package_product.build_product(db, scanner, library, "v0.1.0",
-                                           output)
+    result = package_product.build_product(db, scanner, "v0.1.0", output)
     assert result["version"] == "v0.1.0"
     with tarfile.open(output, "r:gz") as archive:
         files = set(archive.getnames())
         for name in (
                 "vulnimprint/bin/vulnimprint",
                 "vulnimprint/bin/vulnimprint-scan",
-                "vulnimprint/lib/libyara_x_capi.so",
                 "vulnimprint/share/vulnimprint/db/database.yarc",
                 "vulnimprint/licenses/yara-x/LICENSE",
                 "vulnimprint/licenses/elfio/LICENSE.txt",
@@ -85,27 +82,48 @@ def test_product_fails_when_bundled_runtime_cannot_be_verified(
     scanner = tmp_path / "scanner"
     scanner.write_bytes(b"fixture")
     scanner.chmod(0o755)
-    lib = tmp_path / "libyara_x_capi.so"
-    lib.write_bytes(b"fixture")
 
     def unresolved_ldd(argv, **kwargs):
+        if argv[0] == 'readelf':
+            return SimpleNamespace(returncode=0,
+                                   stdout='Dynamic section: libc.so.6',
+                                   stderr='')
         return SimpleNamespace(returncode=0,
-                               stdout="libyara_x_capi.so => not found",
+                               stdout="libc.so.6 => not found",
                                stderr="")
 
     monkeypatch.setattr(package_product.subprocess, "run", unresolved_ldd)
     dest = tmp_path / "dist/product.tar.gz"
     with pytest.raises(ReleaseRejected,
                        match="runtime dependencies unresolved"):
-        package_product.build_product(db, scanner, lib, "v0.1.0", dest)
+        package_product.build_product(db, scanner, "v0.1.0", dest)
     assert not dest.exists()
+
+
+def test_product_rejects_dynamic_yara_x_dependency(tmp_path, monkeypatch):
+    root = _synthetic_project(tmp_path)
+    monkeypatch.setattr(package_product, '__file__',
+                        str(root / 'tools/package_product.py'))
+    monkeypatch.setattr(package_product, 'verify_release', lambda *a, **k: None)
+    db = tmp_path / 'db'
+    db.mkdir()
+    scanner = tmp_path / 'scanner'
+    scanner.write_bytes(b'fixture')
+    scanner.chmod(0o755)
+    monkeypatch.setattr(
+        package_product.subprocess, 'run',
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0, stdout='NEEDED libyara_x_capi.so', stderr=''))
+    with pytest.raises(ReleaseRejected, match='not statically linked'):
+        package_product.build_product(db, scanner, 'v0.1.0',
+                                      tmp_path / 'dist/product.tar.gz')
 
 
 def _mini_product(tmp_path):
     """Real tar structure, synthetic bytes; SBOM response stays mocked."""
     root = tmp_path / 'contents/vulnimprint'
     for name in ('bin/vulnimprint', 'bin/vulnimprint-scan',
-                 'lib/libyara_x_capi.so', 'share/vulnimprint/db/database.yarc'):
+                 'share/vulnimprint/db/database.yarc'):
         file = root / name
         file.parent.mkdir(parents=True, exist_ok=True)
         file.write_bytes(b'fixture for ' + name.encode())

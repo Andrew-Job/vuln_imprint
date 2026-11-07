@@ -189,3 +189,159 @@ int main(int argc, char** argv) {
                     str(exe), str(dso)],
                    check=True,
                    timeout=30)
+
+
+def test_rx_segment_does_not_expose_nonexecuting_rodata(tmp_path):
+    """Own range-selection policy: PF_X PT_LOAD may contain .rodata."""
+    elfio = ROOT / 'external/elfio/elfio/elfio.hpp'
+    assert elfio.is_file(), 'Pinned ELFIO dependency required in native CI'
+    cc = shutil.which('cc')
+    cxx = shutil.which('g++') or shutil.which('clang++')
+    assert cc and cxx
+    source = tmp_path / 'mixed.c'
+    source.write_text(
+        """__attribute__((used)) const char sentinel[] = "VULNIMPRINT_INERT_BYTES";
+int main(void) { return sentinel[0] == 0; }
+""")
+    binary = tmp_path / 'mixed'
+    subprocess.run(
+        [cc, '-Wl,-z,noseparate-code',
+         str(source), '-o',
+         str(binary)],
+        check=True,
+        timeout=45)
+    harness = tmp_path / 'ranges.cc'
+    harness.write_text(r'''#include "vulnimprint/elf.h"
+#include <cstdint>
+#include <fstream>
+#include <iterator>
+#include <vector>
+#include <cstring>
+#include <algorithm>
+int main(int argc, char** argv) {
+  if (argc != 2) return 10;
+  std::ifstream stream(argv[1], std::ios::binary);
+  std::vector<std::uint8_t> bytes{std::istreambuf_iterator<char>(stream),
+                                   std::istreambuf_iterator<char>()};
+  const char needle[] = "VULNIMPRINT_INERT_BYTES";
+  if (std::search(bytes.begin(), bytes.end(), needle, needle + sizeof(needle) - 1)
+      == bytes.end()) return 11;
+  for (const auto& region : vulnimprint::executable_regions(bytes)) {
+    for (std::size_t pos = region.offset; pos + sizeof(needle) - 1 <= region.offset + region.length; ++pos) {
+      if (std::memcmp(bytes.data() + pos, needle, sizeof(needle) - 1) == 0) return 12;
+    }
+  }
+  return 0;
+}''')
+    output = tmp_path / 'ranges'
+    subprocess.run([
+        cxx, '-std=c++20', '-I',
+        str(ROOT / 'scanner/include'), '-I',
+        str(ROOT / 'external/elfio'),
+        str(harness),
+        str(ROOT / 'scanner/src/elf.cc'), '-o',
+        str(output)
+    ],
+                   check=True,
+                   timeout=90)
+    subprocess.run([str(output), str(binary)], check=True, timeout=45)
+
+
+def test_executable_section_load_intersection_preserves_offsets(tmp_path):
+    """An RX PT_LOAD ending inside .text must expose only backed .text bytes."""
+    import struct
+
+    from factory.elf import ELF
+
+    root = ROOT
+    assert (root / 'external/elfio/elfio/elfio.hpp').is_file()
+    cc = shutil.which('cc')
+    cxx = shutil.which('g++') or shutil.which('clang++')
+    assert cc and cxx
+    source = tmp_path / 'intersection.c'
+    source.write_text('int main(void) { return 17; }\n')
+    original = tmp_path / 'original'
+    subprocess.run([cc, '-O2', '-no-pie',
+                    str(source), '-o',
+                    str(original)],
+                   check=True,
+                   timeout=30)
+    parsed = ELF(original)
+    section = next(s for s in parsed._file.iter_sections() if s.name == '.text')
+    text_offset = int(section['sh_offset'])
+    text_va = int(section['sh_addr'])
+    text_size = int(section['sh_size'])
+    assert text_size > 16
+    half = text_size // 2
+    header = parsed._file.header
+    patched = bytearray(original.read_bytes())
+    modified_segment = False
+    for index, segment in enumerate(parsed._file.iter_segments()):
+        if segment['p_type'] != 'PT_LOAD' or not int(segment['p_flags']) & 1:
+            continue
+        segment_offset = int(segment['p_offset'])
+        segment_va = int(segment['p_vaddr'])
+        if (segment_offset <= text_offset and text_offset + text_size
+                <= segment_offset + int(segment['p_filesz']) and
+                segment_va + text_offset - segment_offset == text_va):
+            file_size = text_offset - segment_offset + half
+            phdr = int(header['e_phoff']) + index * int(header['e_phentsize'])
+            struct.pack_into('<Q', patched, phdr + 32, file_size)
+            modified_segment = True
+            break
+    assert modified_segment, 'fixture requires a file-backed .text PT_LOAD'
+    shortened = tmp_path / 'clipped'
+    shortened.write_bytes(patched)
+
+    # The Factory reference scanner and its disassembler must agree on the
+    # reduced original-file span, not silently drop the partially backed code.
+    factory_regions = ELF(shortened).code_regions()
+    text_regions = [(addr, offset, len(buf))
+                    for name, addr, offset, buf in factory_regions
+                    if name == '.text']
+    assert text_regions == [(text_va, text_offset, half)]
+
+    harness = tmp_path / 'intersection.cc'
+    harness.write_text(r'''
+#include "vulnimprint/elf.h"
+#include <cstdint>
+#include <fstream>
+#include <iterator>
+#include <vector>
+#include <cstdlib>
+int main(int argc, char** argv) {
+  if (argc != 5) return 10;
+  std::ifstream stream(argv[1], std::ios::binary);
+  std::vector<std::uint8_t> bytes{std::istreambuf_iterator<char>(stream),
+                                   std::istreambuf_iterator<char>()};
+  const auto offset = static_cast<std::size_t>(std::strtoull(argv[2], nullptr, 10));
+  const auto length = static_cast<std::size_t>(std::strtoull(argv[3], nullptr, 10));
+  const auto va = static_cast<std::uint64_t>(std::strtoull(argv[4], nullptr, 10));
+  bool found = false;
+  for (const auto& r : vulnimprint::executable_regions(bytes)) {
+    if (r.offset == offset && r.length == length && r.vaddr == va) found = true;
+    if (r.offset > bytes.size() || r.length > bytes.size() - r.offset) return 11;
+  }
+  return found ? 0 : 12;
+}
+''')
+    compiled = tmp_path / 'intersection'
+    subprocess.run([
+        cxx, '-std=c++20', '-Wall', '-Wextra', '-Wpedantic', '-Werror', '-I',
+        str(root / 'scanner/include'), '-I',
+        str(root / 'external/elfio'),
+        str(root / 'scanner/src/elf.cc'),
+        str(harness), '-o',
+        str(compiled)
+    ],
+                   check=True,
+                   timeout=90)
+    subprocess.run([
+        str(compiled),
+        str(shortened),
+        str(text_offset),
+        str(half),
+        str(text_va)
+    ],
+                   check=True,
+                   timeout=30)

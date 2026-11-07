@@ -32,7 +32,7 @@ claim of CVE-specific validation.
 
 ## Release evidence and DB index
 
-Reviewed independent holdouts use `reviewed-evidence.json` schema version 2
+Reviewed independent holdouts use `reviewed-evidence.json` schema version 3
 with a source-built sample's `build_profile`:
 
 ```json
@@ -49,8 +49,10 @@ with a source-built sample's `build_profile`:
 The validator requires actual version+binary digest for source-built affected,
 fixed and backport controls. Independently obtained stripped third-party
 products may legitimately have an unidentified compiler; do not infer a
-version for them, and do not count them toward compiler coverage. An independent affected and fixed control for **each of the eight**
-GCC/Clang version-and-optimization lanes is mandatory for the first release. The published
+version for them, and do not count them toward compiler coverage. An independent affected and fixed control is mandatory for **each lane
+claimed by a CVE** in its `supported_profiles`. The eight-lane experimental
+matrix is a source of coverage hypotheses, not a universal claim for every
+rule. The published
 `index.json` records the **observed** full compiler versions under each CVE's
 `tested_build_profiles`; it does not imply the rule works on other compiler
 versions, ABI, flags, LTO modes or operating systems.
@@ -64,12 +66,15 @@ python -m tools.check_toolchain_matrix --out toolchain-matrix.json
 No rule may claim cross-compiler or cross-version support merely because
 fields for them exist in the schema. The supported target remains Linux
 ELF64 little-endian x86-64 SysV. Generate and run source-build experiments in a contributor fork or
-working directory. Research tooling does not add unreviewed rules to the production database.
+working directory. Factory-generated records default to the `test` channel.
+A contributor can explicitly assign a record to `production`; this is a
+channel-selection decision, not a validation-state promotion. Detection
+correctness is assessed separately.
 
 ## Additional compiler profiles
 
-The default CI lanes use packages available on the pinned Ubuntu 22.04
-runner. The list is a tested-build baseline, not universal coverage.
+The default native CI lanes use GCC 11/12 and Clang 14/15 packages on
+the Ubuntu 24.04 runner. The list is a tested-build baseline, not universal coverage.
 Research profiles may explicitly specify other toolchain versions:
 
 ```bash

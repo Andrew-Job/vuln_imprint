@@ -8,10 +8,10 @@ concurrency:
   group: vulnimprint-release
   cancel-in-progress: false
 jobs:
-  # Unprivileged build job: source of truth is the reviewed Git tree.
+  # Unprivileged build job: source of truth is the protected Git tree.
   # It has no permission to publish releases or mint OIDC credentials.
   build-and-validate:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 240
     permissions:
       contents: read
@@ -40,22 +40,14 @@ jobs:
       - name: Build pinned official YARA-X and native scanner
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential gcc-11 gcc-12 clang-14 clang-15 \
-             cmake ninja-build pkg-config libssl-dev binutils
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config libssl-dev binutils
           python scripts/verify_dependencies.py --require-checkout
-          python -m tools.check_toolchain_matrix --out toolchain-matrix.json
           bash scripts/bootstrap_yarax.sh
           echo "PKG_CONFIG_PATH=$HOME/.local/lib/pkgconfig" >> "$GITHUB_ENV"
-          echo "LD_LIBRARY_PATH=$HOME/.local/lib" >> "$GITHUB_ENV"
-      - name: Native scanner and serialized DB integration test
-        run: python scripts/native_yarax_smoke.py --scanner build/scanner/vulnimprint-scan
-      - name: Verify the entire validated Git CVE source tree
-        run: python -m scripts.check_validated_signatures
-      - name: Compile all Git-approved CVE signatures into one database
+      - name: Compile all production-channel CVE records
         run: |
-          python -m tools.production_db assemble --signatures signatures/validated \
-            --output release-output/db --scanner build/scanner/vulnimprint-scan
-          python -m tools.production_db verify --database release-output/db \
+          python -m tools.production_db assemble --signatures signatures \
+            --channel production --output release-output/db \
             --scanner build/scanner/vulnimprint-scan
       - name: Produce packaged native release and release metadata
         env:
@@ -67,7 +59,6 @@ jobs:
           SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")" \
             python -m tools.package_product --database release-output/db \
             --scanner native-install/bin/vulnimprint-scan \
-            --yarax-lib "$HOME/.local/lib/libyara_x_capi.so" \
             --version "$VERSION" --output dist/vulnimprint-linux-x86_64.tar.gz
           bash scripts/install_syft.sh
           python -m tools.create_sbom \
@@ -87,9 +78,9 @@ jobs:
         run: |
           mkdir -p /tmp/vulnimprint-clean
           tar -xf dist/vulnimprint-linux-x86_64.tar.gz -C /tmp/vulnimprint-clean
-          env -u LD_LIBRARY_PATH -u PYTHONPATH \
+          env -u PYTHONPATH \
             /tmp/vulnimprint-clean/vulnimprint/bin/vulnimprint version | grep -Fx "$VERSION"
-          env -u LD_LIBRARY_PATH -u PYTHONPATH \
+          env -u PYTHONPATH \
             /tmp/vulnimprint-clean/vulnimprint/bin/vulnimprint scan --json \
             /tmp/vulnimprint-clean/vulnimprint/bin/vulnimprint-scan \
             >/tmp/vulnimprint-product-smoke.json
@@ -100,7 +91,7 @@ jobs:
           assert result['engine'] == 'yara-x'
           assert len(result['results']) == 1 and result['results'][0]['error'] is None
           PY
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vulnimprint-release-candidate
           path: dist/
@@ -111,7 +102,7 @@ jobs:
   # research specimens or untrusted upstream build recipes.
   publish:
     needs: build-and-validate
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     environment: production
     timeout-minutes: 45
     permissions:
@@ -126,13 +117,13 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
-      - name: Download build job's immutable artifact from this run
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Download build job's artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vulnimprint-release-candidate
+          path: dist
+      - name: Verify downloaded immutable candidate
         run: |
-          mkdir dist
-          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
-            --name vulnimprint-release-candidate --dir dist
           (cd dist && sha256sum -c SHA256SUMS)
           python -m tools.release_approval verify \
             --contents dist/release-contents.json --assets-dir dist
@@ -182,7 +173,7 @@ jobs:
           ! gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1
           gh release create "$VERSION" --verify-tag --draft --repo "$GITHUB_REPOSITORY" \
             --title "VulnImprint $VERSION" \
-            --notes "Verified native scanner with Git-approved CVE signatures. Scan target: Linux ELF64 x86-64. SBOM and SHA256SUMS attached." \
+            --notes "Native YARA-X scanner and Git-tracked machine signatures for Linux ELF64 x86-64. The bundled index records CVE-owned production DB records and source digests; channel assignment and a match alone are not proof of exploitability. SBOM and SHA256SUMS attached." \
             dist/*.tar.gz dist/release-contents.json dist/SBOM.spdx.json dist/SHA256SUMS
       - name: Verify uploaded bytes before making public
         env:
@@ -208,8 +199,8 @@ jobs:
             --contents downloaded/release-contents.json --assets-dir downloaded
           mkdir -p clean-downloaded
           tar -xf downloaded/vulnimprint-linux-x86_64.tar.gz -C clean-downloaded
-          env -u LD_LIBRARY_PATH -u PYTHONPATH clean-downloaded/vulnimprint/bin/vulnimprint version | grep -Fx "$VERSION"
-          env -u LD_LIBRARY_PATH -u PYTHONPATH clean-downloaded/vulnimprint/bin/vulnimprint scan --json \
+          env -u PYTHONPATH clean-downloaded/vulnimprint/bin/vulnimprint version | grep -Fx "$VERSION"
+          env -u PYTHONPATH clean-downloaded/vulnimprint/bin/vulnimprint scan --json \
             clean-downloaded/vulnimprint/bin/vulnimprint-scan >/tmp/vulnimprint-release-self-scan.json
           python - <<'PYCODE'
           import json

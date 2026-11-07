@@ -29,3 +29,11 @@ def test_cas_record_cannot_read_outside_store(tmp_path):
 
     attacker["blob"]["path"] = 42
     assert not store.verify(attacker)
+
+    attacker = copy.deepcopy(record)
+    attacker['blob']['path'] = 'records/CVE-2026-12345/fixture.json'
+    assert not store.verify(attacker)
+
+    attacker = copy.deepcopy(record)
+    attacker['blob']['algorithm'] = 'md5'
+    assert not store.verify(attacker)

@@ -23,7 +23,6 @@ class SBOMError(ValueError):
 REQUIRED_PRODUCT_FILES = (
     'vulnimprint/bin/vulnimprint',
     'vulnimprint/bin/vulnimprint-scan',
-    'vulnimprint/lib/libyara_x_capi.so',
     'vulnimprint/share/vulnimprint/db/database.yarc',
     'vulnimprint/share/vulnimprint/Cargo.lock',
 )
