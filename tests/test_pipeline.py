@@ -138,10 +138,10 @@ def test_validate_yara_x_builds_complete_cve_owned_record(
         return FakeScanner()
 
     monkeypatch.setattr(pipeline.YaraXScanner, 'compile', compile_source)
-    monkeypatch.setattr(
-        pipeline, 'scan_patterns',
-        lambda _patterns, _sample: [SimpleNamespace(rule=0, file_offset=123)])
-    sample = SimpleNamespace(id='affected', path=tmp_path / 'sample.elf')
+    sample = SimpleNamespace(id='affected',
+                             path=tmp_path / 'sample.elf',
+                             regions=[(120, b'\x00\x00\x00\x48\x83\xec\x28\x00')
+                                     ])
     result = pipeline.validate_yara_x('CVE-2099-12345',
                                       [Pattern.from_hex('48 83 EC 28')],
                                       [sample])
