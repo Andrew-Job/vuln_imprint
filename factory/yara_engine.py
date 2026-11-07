@@ -64,11 +64,10 @@ def source_from_packs(packs: list[dict], *, channels=None) -> str:
             if (not isinstance(platform, dict) or
                     set(platform) != {"os", "format", "arch", "bits", "abi"} or
                     type(platform.get("bits")) is not int or
-                    tuple(platform[field] for field in
-                          ("os", "format", "arch", "bits", "abi")) !=
-                    SUPPORTED_PLATFORM):
-                raise ValueError(
-                    f"{cve}/{record_id}: unsupported ELF platform")
+                    tuple(platform[field]
+                          for field in ("os", "format", "arch", "bits", "abi"))
+                    != SUPPORTED_PLATFORM):
+                raise ValueError(f"{cve}/{record_id}: unsupported ELF platform")
             patterns = record.get("rules")
             if not isinstance(patterns, list) or not patterns:
                 raise ValueError(f"{cve}/{record_id}: empty pattern collection")

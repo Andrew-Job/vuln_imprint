@@ -44,8 +44,11 @@ def make_pack(root: Path,
 
 
 PLATFORM = {
-    "os": "linux", "format": "ELF", "arch": "x86-64",
-    "bits": 64, "abi": "sysv"
+    "os": "linux",
+    "format": "ELF",
+    "arch": "x86-64",
+    "bits": 64,
+    "abi": "sysv"
 }
 
 
@@ -59,11 +62,10 @@ def test_two_independent_records_are_owned_by_one_cve(tmp_path):
     assert result["cve_count"] == 1
     assert result["record_count"] == 2
     assert len({entry["pack_dir"] for entry in result["entries"]}) == 2
-    assert {pack["records"][0]["record_id"]
-            for pack in load_included_packs(snapshot)} == {
-                first["records"][0]["record_id"],
-                second["records"][0]["record_id"]
-            }
+    assert {
+        pack["records"][0]["record_id"]
+        for pack in load_included_packs(snapshot)
+    } == {first["records"][0]["record_id"], second["records"][0]["record_id"]}
 
 
 def test_unsupported_machine_profile_is_rejected(tmp_path):
@@ -84,7 +86,8 @@ def test_compiler_versions_are_distinct_records_for_same_cve(tmp_path):
         path = directory / "pack.json"
         pack = json.loads(path.read_text())
         pack["records"][0]["supported_profiles"] = [{
-            "compiler_family": "gcc", "compiler_version": version,
+            "compiler_family": "gcc",
+            "compiler_version": version,
             "optimization": "-O2"
         }]
         path.write_text(json.dumps(pack))
@@ -93,8 +96,10 @@ def test_compiler_versions_are_distinct_records_for_same_cve(tmp_path):
                        channel="test")["cve_count"] == 1
     packs = load_included_packs(output)
     assert len(packs) == 2
-    assert {pack["records"][0]["supported_profiles"][0]["compiler_version"]
-            for pack in packs} == {"11.4", "12.3"}
+    assert {
+        pack["records"][0]["supported_profiles"][0]["compiler_version"]
+        for pack in packs
+    } == {"11.4", "12.3"}
 
 
 def test_duplicate_record_id_and_corrupted_profile_are_rejected(tmp_path):
@@ -112,4 +117,3 @@ def test_duplicate_record_id_and_corrupted_profile_are_rejected(tmp_path):
     (db / "index.json").write_text(json.dumps(index))
     with pytest.raises(ValueError, match="inconsistent"):
         load_included_packs(db)
-
