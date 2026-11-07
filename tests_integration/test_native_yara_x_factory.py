@@ -40,9 +40,11 @@ def test_factory_compiles_saves_loads_and_scans_executable_offsets(
             "channel": "test",
             "source_type": "factory",
             "platform": {
+                "os": "linux",
                 "format": "ELF",
                 "arch": "x86-64",
-                "bits": 64
+                "bits": 64,
+                "abi": "sysv",
             },
             "rules": [{
                 "hex": MARKER.hex(" ")

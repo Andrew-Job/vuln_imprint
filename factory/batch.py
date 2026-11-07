@@ -4,7 +4,6 @@ No CVE is marked verified when acquisition, compilation, validation, or the
 native YARA-X oracle failed to run. Untrusted source builds require sandboxed CI.
 """
 from __future__ import annotations
-import hashlib
 import json
 import re
 import subprocess

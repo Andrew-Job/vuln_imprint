@@ -6,7 +6,8 @@ import importlib
 import re
 from pathlib import Path
 
-from .signature_identity import cve_pack_records, record_identity
+from .signature_identity import (SUPPORTED_PLATFORM, cve_pack_records,
+                                 record_identity)
 
 
 def _file_sha256(path: Path) -> str:
@@ -60,17 +61,14 @@ def source_from_packs(packs: list[dict], *, channels=None) -> str:
             if selected_channels is not None and channel not in selected_channels:
                 continue
             platform = record.get("platform")
-            if not isinstance(platform,
-                              dict) or platform.get("format") != "ELF":
+            if (not isinstance(platform, dict) or
+                    set(platform) != {"os", "format", "arch", "bits", "abi"} or
+                    type(platform.get("bits")) is not int or
+                    tuple(platform[field] for field in
+                          ("os", "format", "arch", "bits", "abi")) !=
+                    SUPPORTED_PLATFORM):
                 raise ValueError(
-                    f"{cve}/{record_id}: only ELF records supported")
-            arch = platform.get("arch", "x86-64")
-            bits = platform.get("bits", 64)
-            if not isinstance(arch, str) or not re.fullmatch(
-                    r"[A-Za-z0-9_-]{2,40}", arch):
-                raise ValueError("invalid architecture identifier")
-            if type(bits) is not int or bits not in (32, 64):
-                raise ValueError("invalid ELF word size")
+                    f"{cve}/{record_id}: unsupported ELF platform")
             patterns = record.get("rules")
             if not isinstance(patterns, list) or not patterns:
                 raise ValueError(f"{cve}/{record_id}: empty pattern collection")

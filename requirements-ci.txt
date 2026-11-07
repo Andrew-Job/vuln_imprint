@@ -5,5 +5,3 @@ pluggy==1.6.0
 iniconfig==2.3.0
 packaging==25.0
 pygments==2.20.0
-PyYAML==6.0.3
-coverage==7.13.3

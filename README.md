@@ -7,7 +7,7 @@ implementations inside compiled binary files. Detection is not derived solely
 from library name or package version. A match does not prove exploitability;
 absence of a match is not proof of safety.
 
-## Current implementation
+## Product implementation
 
 - **Scanner**: C++20, ELFIO and official YARA-X C API, binary matching and JSON
   reports with file offsets, CVE identifiers and explicit scan errors.

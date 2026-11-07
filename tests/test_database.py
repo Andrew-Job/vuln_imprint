@@ -24,9 +24,11 @@ def test_test_and_production_channels_select_records_without_quality_states(
                 'channel': 'production',
                 'source_type': 'manual',
                 'platform': {
+                    'os': 'linux',
                     'format': 'ELF',
                     'arch': 'x86-64',
-                    'bits': 64
+                    'bits': 64,
+                    'abi': 'sysv'
                 },
                 'rules': [{
                     'id': 'prod',
@@ -38,9 +40,11 @@ def test_test_and_production_channels_select_records_without_quality_states(
                 'channel': 'test',
                 'source_type': 'manual',
                 'platform': {
+                    'os': 'linux',
                     'format': 'ELF',
                     'arch': 'x86-64',
-                    'bits': 64
+                    'bits': 64,
+                    'abi': 'sysv'
                 },
                 'rules': [{
                     'id': 'test',

@@ -246,11 +246,10 @@ void metadata_cb(const YRX_METADATA* metadata, void* user_data) noexcept {
             return;
         }
         const std::string key(metadata->identifier);
-        if (key == "cve" || key == "issue") {
+        // Custom YARA-X rules can have arbitrary metadata. Only the current
+        // CVE key contributes to VulnImprint's CVE identity and totals.
+        if (key == "cve" && vulnimprint::IsCve(metadata->value.string)) {
             state->issue = metadata->value.string;
-            if (!vulnimprint::IsCve(state->issue)) {
-                throw std::runtime_error("Invalid CVE metadata");
-            }
         }
     });
 }

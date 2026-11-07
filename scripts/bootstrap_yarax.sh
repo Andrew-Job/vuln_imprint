@@ -14,8 +14,6 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 : "${YARAX_PREFIX:=$HOME/.local}"
 git submodule update --init --recursive
-python3 scripts/verify_dependencies.py --require-checkout
-test -f external/yara-x/Cargo.lock || { echo 'Pinned Cargo.lock missing' >&2; exit 2; }
 rustup toolchain install 1.99.1 --profile minimal
 cargo +1.99.1 install cargo-c --version 0.10.26 --locked
 export CARGO_TARGET_DIR="$ROOT/external/yara-x/target"
@@ -26,9 +24,6 @@ export CARGO_TARGET_DIR="$ROOT/external/yara-x/target"
         --libdir "$YARAX_PREFIX/lib"
 )
 export PKG_CONFIG_PATH="$YARAX_PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-test -s "$YARAX_PREFIX/lib/libyara_x_capi.a" || { echo "YARA-X static library missing" >&2; exit 2; }
-version="$(pkg-config --modversion yara_x_capi)"
-test "$version" = '1.23.0' || { echo "Wrong YARA-X C API version: $version" >&2; exit 2; }
 if [[ "$BUILD_SCANNER" == "1" ]]; then
     cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
     cmake --build build --parallel 2

@@ -21,7 +21,7 @@ python3 scripts/verify_dependencies.py --require-checkout
 
 The C++ scanner uses header-only [ELFIO](https://github.com/serge1/ELFIO) Release_3.12 at upstream commit `8ae6cec5d60495822ecd57d736f66149da9b1830` in `external/elfio`. No upstream header is copied into VulnImprint source. CMake includes the submodule directly; the product includes ELFIO MIT license text.
 
-The matching dependency, statically linked into the release Scanner through the official C API, is VirusTotal YARA-X **v1.23.0**, commit `afe4585b12f56c698794dc80b3d28ddb87b56c0a`. The full SHA matches upstream release publishing provenance. Nested Git submodules, if any, are fetched recursively. Cargo resolves Rust dependency versions using the pinned upstream `Cargo.lock`. The build toolchain is pinned to Rust **1.99.1** via `rust-toolchain.toml`, and `cargo-c` **0.10.26**; changing either is a reviewed dependency upgrade. Native CI builds the C API and its Python `yara_x` binding using `scripts/build_yarax_python.sh` from **the same pinned source** (pinned `maturin==1.16.0`). No independently floating PyPI YARA-X wheel is accepted in these integration checks. `verify_dependencies.py --require-checkout` also validates the initialized status of every nested submodule.
+The matching dependency, statically linked into the release Scanner through the official C API, is VirusTotal YARA-X **v1.23.0**, commit `afe4585b12f56c698794dc80b3d28ddb87b56c0a`. The pinned SHA identifies the exact source tree used by this release. Nested Git submodules, if any, are fetched recursively. Cargo resolves Rust dependency versions using the pinned upstream `Cargo.lock`. The build toolchain is pinned to Rust **1.99.1** via `rust-toolchain.toml`, and `cargo-c` **0.10.26**; changing either is a reviewed dependency upgrade. Native CI builds the C API and its Python `yara_x` binding using `scripts/build_yarax_python.sh` from **the same pinned source** (pinned `maturin==1.16.0`). No independently floating PyPI YARA-X wheel is accepted in these integration checks. `verify_dependencies.py --require-checkout` also validates the initialized status of every nested submodule.
 
 ## Deliberate upgrades
 
@@ -58,7 +58,7 @@ cache presence alone is never evidence of CVE accuracy or upstream trust.
 ## Factory parsing and release SBOM (pinned dependencies)
 
 - `requirements-factory.txt` pins **pyelftools 0.33** and **Capstone 5.0.9**.
-  Installed from PyPI in the offline/native CI jobs. These
+  Installed from PyPI for Python/native test jobs. These
   are build/research tools, not runtime components of the distributed scanner.
   No separate Git submodule checkout is needed for versioned Python wheels.
 - `scripts/install_syft.sh` downloads the upstream **Syft 1.57.0** Linux

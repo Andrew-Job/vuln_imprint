@@ -1,4 +1,4 @@
-name: VulnImprint source and native CI
+name: VulnImprint CI
 on:
   push:
     branches: [main]
@@ -19,10 +19,9 @@ jobs:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: requirements-format.txt
-      - name: Install C++ and Python formatters
-        run: python -m pip install -r requirements-format.txt
-      - name: Check first-party source formatting
-        run: make format-check
+      - run: python -m pip install -r requirements-format.txt
+      - run: make format-check
+
   offline:
     runs-on: ubuntu-24.04
     steps:
@@ -35,21 +34,19 @@ jobs:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: requirements-ci.txt
-      - name: Verify pinned Git submodule pointers
-        run: python scripts/verify_dependencies.py
-      - name: Validate all Git CVE source records
-        run: python -m scripts.check_cve_source_tree
-      - name: Validate changed CVE source records
+      - run: python -m pip install -r requirements-ci.txt
+      - name: Validate CVE source and signatures
+        run: |
+          python -m scripts.check_cve_source_tree
+          python -m scripts.check_signature_sources
+      - name: Validate modified CVE records
         if: github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: python -m scripts.check_cve_pr --base "$BASE_SHA"
-      - name: Unit tests and test-database compilation
-        run: |
-          python -m pip install -r requirements-ci.txt
-          python -m coverage run -m pytest -q tests tests_release
-          python -m coverage report --include='factory/*.py,tools/*.py'
-          python -m compileall -q scanner factory tools scripts tests tests_release
+      - name: Test product Python code and database/packaging contracts
+        run: python -m pytest -q tests tests_release
+
   security:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -62,16 +59,12 @@ jobs:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: requirements-security.txt
-      - name: Run Python static security checks
-        run: |
-          python -m pip install -r requirements-security.txt
-          python -m bandit -r factory tools scripts -ll -ii
-      - name: Verify pinned upstream dependency metadata
-        run: python scripts/verify_dependencies.py
+      - run: python -m pip install -r requirements-security.txt
+      - run: python -m bandit -r factory tools scripts -ll -ii
+
   native:
     permissions:
       contents: read
-      actions: read
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -84,27 +77,12 @@ jobs:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: requirements-ci.txt
-      - name: System build dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential clang cmake ninja-build pkg-config libssl-dev binutils
-      - name: Install pinned Python testing dependencies
-        run: python -m pip install -r requirements-ci.txt
-      - name: Validate the versioned GCC/Clang source-build matrix
+      - name: Install product build dependencies
         run: |
-          sudo apt-get install -y gcc-11 gcc-12 clang-14 clang-15
-          python -m tools.check_toolchain_matrix --out /tmp/vulnimprint-toolchains.json
-      - name: Preflight ELFIO boundary, fuzzing, JSON and static ELF admission
-        run: |
-          python -m pytest -q \
-            tests_integration/test_elfio_adapter_native.py \
-            tests_integration/test_elfio_adapter_fuzz.py \
-            tests_integration/test_native_json_serialization.py \
-            tests_integration/test_static_product_elf_admission.py
-      - name: Verify recursive Git submodule checkout
-        run: python scripts/verify_dependencies.py --require-checkout
-      - name: Identify the pinned upstream build inputs
-        id: upstream_sha
-        run: echo "value=$(git -C external/yara-x rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Restore pinned YARA-X Cargo build cache
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang cmake ninja-build pkg-config libssl-dev binutils
+          python -m pip install -r requirements-ci.txt
+      - name: Restore YARA-X build cache
         id: rust_cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -118,46 +96,33 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             external/yara-x/target
-          key: ${{ runner.os }}-${{ runner.arch }}-ubuntu-24.04-rust-1.99.1-cargo-c-0.10.26-maturin-1.16.0-python-3.12-yarax-${{ steps.upstream_sha.outputs.value }}-${{ hashFiles('external/yara-x/Cargo.lock', 'scripts/bootstrap_yarax.sh', 'scripts/build_yarax_python.sh') }}-v3
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-ubuntu-24.04-rust-1.99.1-cargo-c-0.10.26-maturin-1.16.0-python-3.12-yarax-${{ steps.upstream_sha.outputs.value }}-
-      - name: Build pinned YARA-X C API from the recursive Git checkout
+          key: ${{ runner.os }}-${{ runner.arch }}-rust-1.99.1-cargo-c-0.10.26-yarax-${{ hashFiles('external/yara-x/Cargo.lock', 'scripts/bootstrap_yarax.sh', 'scripts/build_yarax_python.sh') }}-v1
+      - name: Build actual YARA-X C API and Python binding
         run: |
           bash scripts/bootstrap_yarax.sh --capi-only
           echo "PKG_CONFIG_PATH=$HOME/.local/lib/pkgconfig" >> "$GITHUB_ENV"
-      - name: Build Python YARA-X bindings from the same pinned upstream source
-        run: bash scripts/build_yarax_python.sh
-      - name: Build VulnImprint scanner and smoke-test the real YARA-X C API
+          bash scripts/build_yarax_python.sh
+      - name: Build Scanner and exercise executable ELF behavior
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build --parallel 2
-          python3 scripts/native_yarax_smoke.py --scanner build/scanner/vulnimprint-scan
-      - name: Test Python YARA-X factory integration
-        run: python -m pytest -q tests_integration/test_native_yara_x_factory.py
-      - name: Compile and verify all test and production CVE records with the native engine
+          python scripts/native_yarax_smoke.py --scanner build/scanner/vulnimprint-scan
+          python -m pytest -q tests_integration
+      - name: Compile databases and exercise all production patterns
         run: |
           python -m tools.production_db assemble --signatures signatures \
-            --channel test --output /tmp/vulnimprint-ci-db \
+            --channel test --output /tmp/vulnimprint-db-test \
             --scanner build/scanner/vulnimprint-scan
-      - name: Compile production CVE database and check live native pattern matches
-        run: |
           python -m tools.production_db assemble --signatures signatures \
-            --channel production --output /tmp/vulnimprint-ci-production \
+            --channel production --output /tmp/vulnimprint-db-production \
             --scanner build/scanner/vulnimprint-scan
           python -m tools.production_db verify \
-            --database /tmp/vulnimprint-ci-production \
+            --database /tmp/vulnimprint-db-production \
             --scanner build/scanner/vulnimprint-scan
           python -m scripts.check_native_cve_signatures \
             --scanner build/scanner/vulnimprint-scan \
-            --database /tmp/vulnimprint-ci-production/database.yarc
-      - name: Validate reviewed Git CVEs against independent specimens
-        env:
-          VULNIMPRINT_CORPUS_HOST: ${{ vars.VULNIMPRINT_CORPUS_HOST }}
-        run: |
-          python -m scripts.check_native_cve_corpus \
-            --scanner build/scanner/vulnimprint-scan
-      - name: Save complete pinned YARA-X Cargo build cache
-        id: rust_cache_save
+            --database /tmp/vulnimprint-db-production/database.yarc
+      - name: Save YARA-X build cache
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.rust_cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

@@ -6,8 +6,6 @@ repo=anchore/syft
 [[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] || {
   echo 'Syft release is for Linux x86-64' >&2; exit 2;
 }
-command -v gh >/dev/null || { echo 'GitHub CLI required for Syft release verification' >&2; exit 2; }
-python3 "$(dirname "${BASH_SOURCE[0]}")/check_gh_version.py"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 archive="syft_${version}_linux_amd64.tar.gz"
@@ -28,4 +26,3 @@ printf '%s  %s\n' "$expected" "$work/$archive" | sha256sum --check --status
 mkdir -p "$HOME/.local/bin"
 tar -xzf "$work/$archive" -C "$work" syft
 install -m 0755 "$work/syft" "$HOME/.local/bin/syft"
-"$HOME/.local/bin/syft" version

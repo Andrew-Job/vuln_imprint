@@ -94,8 +94,10 @@ python -m tools.production_db verify --database build/db-production \
 ```
 
 `review` validates independent evidence without generating a database.
-`assemble` is the only builder, reads Git-tracked source and compiles with
-native YARA-X. `verify` checks the built artifacts. Source structure and
+`assemble` is the only release-database builder: it reads Git-tracked
+source and compiles with native YARA-X. Factory may create temporary
+research snapshots with `factory.database.merge_packs`; these are not
+release databases and cannot replace `assemble` artifacts. `verify` checks the built artifacts. Source structure and
 successful compilation alone do not validate CVE semantics.
 
 The database format version is **1**; `pack.json` schema version is **3**.

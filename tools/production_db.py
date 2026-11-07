@@ -17,24 +17,18 @@ from collections import Counter
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from factory.signature_identity import record_sha256
+from factory.signature_identity import record_sha256, SUPPORTED_PLATFORM
 
 CVE = re.compile(r'CVE-\d{4}-\d{4,}\Z')
 HASH = re.compile(r'[0-9a-f]{64}\Z')
 COMMIT = re.compile(r'(?:[0-9a-f]{40}|[0-9a-f]{64})\Z')
 CHANNELS = frozenset({'test', 'production'})
 VALID_LABELS = {'affected', 'fixed', 'backport', 'unrelated'}
-SUPPORTED = ('linux', 'ELF', 'x86-64', 64, 'sysv')
+SUPPORTED = SUPPORTED_PLATFORM
 ENGINE_VERSION = '1.23.0'
 PROFILE_ID = 'linux-elf64-x86_64-sysv'
 VERSION = re.compile(r'\d+\.\d+(?:\.\d+){1,2}\Z')
 COMPILER_FAMILIES = {'gcc', 'clang'}
-# Supported first-release toolchain matrix. Every compiler/optimization lane
-# is tested separately on both affected and fixed independent specimens.
-REQUIRED_LANES = {(family, major, opt)
-                  for family, majors in (('gcc', (11, 12)), ('clang', (14, 15)))
-                  for major in majors
-                  for opt in ('-O2', '-O3')}
 
 
 class ReleaseRejected(ValueError):

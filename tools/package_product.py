@@ -7,7 +7,6 @@ never builds from placeholders or silently resolves a missing dependency.
 from __future__ import annotations
 import argparse
 import gzip
-import hashlib
 import os
 import shutil
 import subprocess

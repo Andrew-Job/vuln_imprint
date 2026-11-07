@@ -193,6 +193,25 @@ int main(void) { return vulnerable_looking_data[0] == 0; }
         assert custom_report['cve_count'] == 0, custom_report
         assert custom_report['unique_cves'] == [], custom_report
 
+        # Invalid CVE metadata and an unrelated user-defined "issue" field
+        # must not create CVE identities or fail an otherwise valid scan.
+        invalid_meta = tmp / 'invalid-meta.yar'
+        invalid_meta.write_text('rule CUSTOM_METADATA {\n'
+                                '  meta:\n'
+                                '    cve = "not-a-cve"\n'
+                                '    issue = "CVE-2099-90001"\n'
+                                '  strings:\n'
+                                f'    $marker = {{ {MARKER} }}\n'
+                                '  condition:\n'
+                                '    any of them\n'
+                                '}\n')
+        untrusted = scan(scanner, '--rules', str(invalid_meta), '--json',
+                         str(elf['affected']))
+        untrusted_hits = matches(untrusted, 1)
+        assert untrusted_hits[0]['cve'] is None, untrusted_hits
+        assert untrusted_hits[0]['record_id'] is None, untrusted_hits
+        assert untrusted['cve_count'] == 0, untrusted
+
         matches(
             scan(scanner, '--compiled', str(compiled), '--json',
                  str(elf['fixed'])), 0)

@@ -23,9 +23,11 @@ def _pack(cve: str,
             "channel": "test",
             "source_type": "manual",
             "platform": {
+                "os": "linux",
                 "format": "ELF",
                 "arch": "x86-64",
-                "bits": 64
+                "bits": 64,
+                "abi": "sysv"
             },
             "rules": [{
                 "id": f"{cve}-pattern-0",

@@ -1,9 +1,9 @@
-# VulnImprint Factory — compiler-version matrix (first supported profile)
+# VulnImprint Factory — compiler profiles
 
 A **compiler family is not a compiler version**. Each compiler profile
 records its family, version, executable identity and optimization explicitly.
 
-## Required training/build lanes
+## Default research build profiles
 
 | Family | Explicit executable | Version lane | Optimizations |
 |---|---|---|---|
@@ -57,7 +57,7 @@ rule. The published
 `tested_build_profiles`; it does not imply the rule works on other compiler
 versions, ABI, flags, LTO modes or operating systems.
 
-Command to verify that the runner can really build the versioned matrix:
+Optional command to inspect locally available research compiler profiles:
 
 ```bash
 python -m tools.check_toolchain_matrix --out toolchain-matrix.json
@@ -73,9 +73,10 @@ correctness is assessed separately.
 
 ## Additional compiler profiles
 
-The default native CI lanes use GCC 11/12 and Clang 14/15 packages on
-the Ubuntu 24.04 runner. The list is a tested-build baseline, not universal coverage.
-Research profiles may explicitly specify other toolchain versions:
+The default Factory research recipes target GCC 11/12 and Clang 14/15,
+when those compilers are installed. Native CI does not install these
+research-only compiler lanes; it tests the product with the build compiler
+and the pinned YARA-X engine. Research profiles may specify other compilers:
 
 ```bash
 python scripts/create_catalog.py --records /tmp/research-cve-records.json \

@@ -55,8 +55,9 @@ detection confidence.
 Factory records compiler/source provenance and checks proposed patterns with
 the pinned Python YARA-X binding. `production_db review` validates independently
 collected per-record evidence; it does not generate a database.
-`production_db assemble` is the only builder of the compiled test and
-production databases, taking records from the Git source tree.
+`production_db assemble` is the only release database builder, taking
+records from the Git source tree. Factory research snapshots are separate
+experimental artifacts, not distributable production databases.
 
 The release ships the Native Scanner statically linked with YARA-X and the
 compiled production database together. Build/test jobs and publication jobs

@@ -11,21 +11,19 @@ C API and does not support an alternative matching engine.
 A source archive containing YARA-X is **not** a built YARA-X library. The
 native build uses Cargo and the upstream `Cargo.lock` to resolve Rust crates,
 compiles `libyara_x_capi.a` with the upstream `release-lto` profile, then
-statically links the C++ scanner against it. The first build requires access to the pinned Rust toolchain, Cargo crates and
-upstream Git submodules; it cannot be performed from only the two source ZIPs
-on a machine without Rust/Cargo and a populated crate cache.
+statically links the C++ scanner against it. The initial build requires the pinned Rust toolchain, Cargo crates and
+Git submodules. The source archives alone do not provide a built C API.
 
 ```bash
 git clone --recurse-submodules https://github.com/Andrew-Job/vuln_imprint.git
 cd vuln_imprint
-python3 scripts/verify_dependencies.py --require-checkout
 python3 -m pip install -r requirements-dev.txt
 bash scripts/bootstrap_yarax.sh
 bash scripts/build_yarax_python.sh
 make test-native
 ```
 
-`bootstrap_yarax.sh` verifies the submodules, obtains the pinned Rust toolchain
+`bootstrap_yarax.sh` initializes the submodules, obtains the pinned Rust toolchain
 and `cargo-c`, builds and installs the official YARA-X C API, builds the
 scanner through CMake and runs `scripts/native_yarax_smoke.py` against the
 real engine. It installs the library under `${YARAX_PREFIX:-$HOME/.local}`;
@@ -71,7 +69,7 @@ python -m tools.production_db verify --database build/db-test \
   --scanner build/scanner/vulnimprint-scan
 ```
 
-`make test` executes first-party Python and release contract tests.
+`make test` executes first-party Python functionality, database and packaging tests.
 `make test-native` additionally executes integration tests requiring the
 native ELFIO adapter and installed YARA-X Python binding. A skipped mandatory
 test is an error. The YARA-X C API smoke test is separately executed by
@@ -87,14 +85,14 @@ The `scripts.check_signature_sources` source check validates the retained
 without running YARA-X. Independent CVE accuracy requires affected, fixed,
 backport and unrelated sample controls bound to each `record_sha256`.
 `production_db review` checks those records independently. The current
-source tree contains no reviewed evidence artifacts, so no independently
-confirmed CVE detection accuracy is claimed. The optional reviewed-corpus
-CI stage reports this condition explicitly rather than asserting a pass.
+source tree contains no reviewed evidence artifacts, so independently confirmed CVE detection accuracy is not claimed. Independent
+corpus review is available through `python -m tools.production_db review`
+when reviewed evidence is supplied;
+the default CI does not execute an empty reviewed-corpus check.
 
-`make test-coverage` reports first-party Python coverage for diagnostics; no
-coverage percentage proves CVE accuracy. No duplicate test suite for YARA-X,
-ELFIO, GCC or other external projects is required. Tests must exercise a
-first-party behavior, contract or established failure mode.
+Install `requirements-coverage.txt` to collect coverage locally with
+`make test-coverage`. Coverage percentages do not establish CVE accuracy. Tests exercise VulnImprint
+behavior and failure modes, not dependencies or GitHub workflow settings.
 
 For supported compiler research lanes, versions, provenance and independent
 holdout requirements, see [Toolchain matrix](TOOLCHAIN_MATRIX.md).
@@ -105,9 +103,10 @@ The release workflow builds the production-channel records from the
 Git-tracked `signatures/` tree and packages the statically linked scanner and
 database together. The product does not carry a YARA-X `.so` dependency;
 compatible Linux system runtime libraries may remain dynamically linked.
-Publishing requires the verified build, attested artifacts and approved
-repository protections. The database inclusion channel is not an accuracy or
-exploitability grade.
+Publishing requires a verified build and artifact attestations. GitHub
+branch, tag and environment protections are configured by repository
+administrators rather than rechecked by workflow scripts. The database
+inclusion channel is not an accuracy or exploitability grade.
 
 Run untrusted upstream source-build recipes only in disposable isolated
 research environments without secrets, publication credentials or privileged

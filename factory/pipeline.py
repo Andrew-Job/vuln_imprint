@@ -9,7 +9,6 @@ import hashlib, json, os, re, subprocess, tempfile, urllib.request, tarfile, zip
 from pathlib import Path
 from dataclasses import dataclass
 from collections import Counter
-from typing import Any
 from .patterns import Pattern
 from .toolchains import check_profile
 from .build_provenance import verify_record

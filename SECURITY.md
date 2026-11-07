@@ -13,6 +13,10 @@ unpatched exploits, private specimens or credentials in public issues.
 Provide the affected commit/version, reproduction and impact if possible.
 No response-time SLA is promised.
 
-A CVE detector itself must pass independent native affected/fixed/backport
-and unrelated checks before admission. Published assets must be verified via
-GitHub artifact attestations and SHA-256 checks before loading the database.
+New or changed CVE detection claims require independent affected, fixed,
+backport and unrelated controls bound to the exact record and compiler
+profiles. A production inclusion channel is not evidence of accuracy: the
+production-channel records in this source tree have no independently
+reviewed evidence of CVE detection accuracy.
+Verify published assets with GitHub artifact attestations and SHA-256 checks
+before loading the database.

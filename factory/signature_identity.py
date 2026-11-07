@@ -9,6 +9,7 @@ import re
 _CVE = re.compile(r"CVE-\d{4}-\d{4,}\Z")
 _RECORD = re.compile(r"VI_[A-F0-9]{24}\Z")
 CHANNELS = frozenset({"test", "production"})
+SUPPORTED_PLATFORM = ("linux", "ELF", "x86-64", 64, "sysv")
 PACK_KEYS = frozenset({"schema_version", "cve", "records", "notes"})
 RECORD_KEYS = frozenset({
     "record_id",

@@ -19,9 +19,11 @@ def test_yara_exec_region_source_has_no_file_offset_conditions():
             'source_type':
                 'factory',
             'platform': {
+                'os': 'linux',
                 'format': 'ELF',
                 'arch': 'x86-64',
-                'bits': 64
+                'bits': 64,
+                'abi': 'sysv'
             },
             'rules': [{
                 'id': 'CVE-2099-99999-v00',
