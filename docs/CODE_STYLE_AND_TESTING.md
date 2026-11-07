@@ -6,7 +6,7 @@ This repository uses established, upstream conventions instead of a
 VulnImprint-specific coding style:
 
 - **C++20:** [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html),
-  with `clang-format` based on the upstream `Google` preset and an explicit four-space indentation override. The checked-in
+  with `clang-format` using the upstream `Google` preset and only the four-space indentation override. The checked-in
   `.clang-format` is the sole C++ formatting configuration.
 - **Python:** [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html),
   with YAPF's upstream `google` preset (`.style.yapf`). Python uses four-space
@@ -15,10 +15,16 @@ VulnImprint-specific coding style:
 - **Shell/YAML:** ordinary ShellCheck and standard YAML syntax; no custom
   style implementation.
 
-To format first-party source, use `make format` with `clang-format` 19.x available on PATH
-and `yapf==0.43.0`. Use `make format-check` to inspect format differences.
-Formatting changes must preserve behavior and be reviewed separately from
-semantic changes. Do not reformat vendored or generated upstream code.
+The Makefile invokes the formatter command-line tools directly: `clang-format`
+for C++ and `yapf` for Python. It does not invoke YAPF through `python -m`.
+On macOS, install both commands with Homebrew (`brew install clang-format
+yapf`). CI installs the formatter packages from `requirements-format.txt` and
+runs the same CLI commands. Keep `requirements-format.txt` separate
+from `requirements-dev.txt`; formatting tools are not runtime or test
+requirements. Use `make format` to format first-party source and
+`make format-check` to inspect format differences. Formatting changes must
+preserve behavior and be reviewed separately from semantic changes. Do not
+reformat vendored or generated upstream code.
 
 ## Library-first implementation policy
 

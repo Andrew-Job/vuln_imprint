@@ -1,9 +1,14 @@
 # Build and test
 
-The supported development and release environment is Ubuntu 22.04 x86-64,
+The initial development and release environment is Ubuntu 22.04 x86-64,
 Python 3.12+, C++20 compiler, CMake, Ninja, pkg-config, Rust/Cargo,
 cargo-c, binutils and the pinned ELFIO and YARA-X Git submodules. The
 GCC/Clang research matrix requires GCC 11/12 and Clang 14/15.
+
+Install the formatter command-line tools separately from Python test
+requirements. On macOS, use `brew install clang-format yapf`; CI installs them
+from `requirements-format.txt`. `requirements-dev.txt` intentionally does not
+install or select formatter runtimes.
 
 ```bash
 git clone --recurse-submodules https://github.com/Andrew-Job/vuln_imprint.git
@@ -22,9 +27,10 @@ requires the actual pinned native scanner and YARA-X Python extension.
 Missing required dependencies fail the corresponding test suite; skipped
 tests are not allowed. No mock may substitute for native CVE validation.
 
-The C++ `clang-format` 19.x configuration is based on Google and has an
-explicit **four-space** indentation override. Python YAPF uses the pinned
-Google preset (four spaces). `make format` rewrites first-party source only;
+The C++ `clang-format` configuration uses Google style with a single
+**four-space** indentation override. Python YAPF uses the pinned
+Google preset (four spaces) and is invoked as the `yapf` command-line tool,
+not through `python -m`. `make format` rewrites first-party source only;
 `make format-check` is a full-source formatting check. Never reformat Git
 submodules.
 

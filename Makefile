@@ -11,7 +11,7 @@ test-native:
 
 .PHONY: format format-check test-coverage
 
-# Google-based C++ style with 4-space indentation; use clang-format 19.x.
+# Google-based C++ style with 4-space indentation; use native clang-format.
 # Never format Git submodules under external/.
 format:
 	$(CLANG_FORMAT) -i scanner/src/*.cc scanner/fuzz/*.cc scanner/include/vulnimprint/*.h
@@ -19,7 +19,7 @@ format:
 
 format-check:
 	$(CLANG_FORMAT) --dry-run --Werror scanner/src/*.cc scanner/fuzz/*.cc scanner/include/vulnimprint/*.h
-	@tmp=$$(mktemp); trap 'rm -f "$$tmp"' EXIT; \
+	@set -eu; tmp=$$(mktemp); trap 'rm -f "$$tmp"' EXIT; \
 	 $(YAPF) --style=.style.yapf -dr cli.py factory scripts tools tests tests_release tests_integration > "$$tmp"; \
 	 if test -s "$$tmp"; then cat "$$tmp"; exit 1; fi
 

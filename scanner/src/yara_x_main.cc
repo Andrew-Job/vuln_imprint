@@ -80,8 +80,8 @@ std::string hex(std::uint64_t n) {
 }
 ByteVec read_file(const fs::path& path, std::uintmax_t max_size) {
     // Open the descriptor before checking its type and length to avoid TOCTOU.
-    const int fd = ::open(path.c_str(),
-                          O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    const int fd =
+        ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
     if (fd < 0) {
         throw std::runtime_error("cannot open regular file " + path.string());
     }
@@ -102,7 +102,7 @@ ByteVec read_file(const fs::path& path, std::uintmax_t max_size) {
     ByteVec bytes(static_cast<std::size_t>(stat_result.st_size));
     for (std::size_t offset = 0; offset < bytes.size();) {
         const ssize_t count =
-                ::read(fd, bytes.data() + offset, bytes.size() - offset);
+            ::read(fd, bytes.data() + offset, bytes.size() - offset);
         if (count < 0 && errno == EINTR) continue;
         if (count <= 0) {
             throw std::runtime_error("short read of regular file " +
@@ -169,7 +169,7 @@ void save_compiled(YRX_RULES* rules, const fs::path& path) {
     Buffer data(pointer);
     if (!data || (data->length != 0 && data->data == nullptr)) {
         throw std::runtime_error(
-                "YARA-X serialization returned invalid buffer");
+            "YARA-X serialization returned invalid buffer");
     }
     std::ofstream output(path, std::ios::binary);
     if (!output || !output.write(reinterpret_cast<const char*>(data->data),
@@ -270,23 +270,22 @@ void match_cb(const YRX_MATCH* match, void* user_data) noexcept {
         if (state->hits->size() >= state->max_hits ||
             (state->global_hits &&
              state->global_hits->load(std::memory_order_relaxed) >=
-                     state->global_hit_limit)) {
+                 state->global_hit_limit)) {
             state->truncated = true;
             return;
         }
         if (state->global_hits &&
             state->global_hits->fetch_add(1, std::memory_order_relaxed) >=
-                    state->global_hit_limit) {
+                state->global_hit_limit) {
             state->truncated = true;
             return;
         }
-        Hit hit{state->issue,    state->cves,
-                state->rule,     state->pattern,
-                state->evidence, state->base_offset + match->offset,
-                match->length,   false,
-                std::nullopt};
+        Hit hit{
+            state->issue,   state->cves,     state->rule,
+            state->pattern, state->evidence, state->base_offset + match->offset,
+            match->length,  false,           std::nullopt};
         const auto location = vulnimprint::LocateMatch(
-                *state->executable_regions, hit.offset, hit.length);
+            *state->executable_regions, hit.offset, hit.length);
         hit.executable = location.executable;
         hit.va = location.virtual_address;
         state->hits->push_back(std::move(hit));
@@ -316,9 +315,8 @@ void rule_cb(const YRX_RULE* rule, void* user_data) noexcept {
             YRX_SUCCESS) {
             state->failed = true;
         }
-        if (!state->failed &&
-            yrx_rule_iter_patterns(rule, pattern_cb, user_data) !=
-                    YRX_SUCCESS) {
+        if (!state->failed && yrx_rule_iter_patterns(
+                                  rule, pattern_cb, user_data) != YRX_SUCCESS) {
             state->failed = true;
         }
     });
@@ -328,7 +326,7 @@ std::uint64_t parse_uint(std::string_view text, std::uint64_t maximum,
                          const std::string& option) {
     std::uint64_t value = 0;
     const auto [end, error] =
-            std::from_chars(text.data(), text.data() + text.size(), value);
+        std::from_chars(text.data(), text.data() + text.size(), value);
     if (text.empty() || error != std::errc{} ||
         end != text.data() + text.size() || value == 0 || value > maximum) {
         throw std::runtime_error("invalid value for " + option);
@@ -384,7 +382,7 @@ Config parse(int argc, char** argv) {
             config.executable_only = false;
         } else if (option == "--threads") {
             config.threads =
-                    static_cast<unsigned>(parse_uint(take(), 4, option));
+                static_cast<unsigned>(parse_uint(take(), 4, option));
         } else if (option == "--max-hits") {
             config.max_hits = parse_uint(take(), 20000, option);
         } else if (option == "--max-per-pattern") {
@@ -393,7 +391,7 @@ Config parse(int argc, char** argv) {
             config.timeout_seconds = parse_uint(take(), 120, option);
         } else if (option == "--max-file-mib") {
             config.max_file =
-                    parse_uint(take(), 256, option) * 1024ULL * 1024ULL;
+                parse_uint(take(), 256, option) * 1024ULL * 1024ULL;
         } else if (option.starts_with("--")) {
             throw std::runtime_error("unknown option " + option);
         } else if (config.target.empty()) {
@@ -406,7 +404,7 @@ Config parse(int argc, char** argv) {
         (config.database_version.size() > 40 ||
          config.database_version.front() != 'v' ||
          config.database_version.find_first_not_of("v0123456789.-") !=
-                 std::string::npos)) {
+             std::string::npos)) {
         throw std::runtime_error("invalid --db-version");
     }
     if ((!config.compiled.empty() && !config.rule_paths.empty()) ||
@@ -431,14 +429,14 @@ std::vector<fs::path> discover(const fs::path& target, bool recursive) {
     const auto add_entry = [&](const fs::directory_entry& entry) {
         if (entry.is_symlink()) {
             throw std::runtime_error(
-                    "directory scan incomplete: symlink entry denied " +
-                    entry.path().string());
+                "directory scan incomplete: symlink entry denied " +
+                entry.path().string());
         }
         if (entry.is_directory()) return;
         if (!entry.is_regular_file()) {
             throw std::runtime_error(
-                    "directory scan incomplete: non-regular entry " +
-                    entry.path().string());
+                "directory scan incomplete: non-regular entry " +
+                entry.path().string());
         }
         paths.push_back(entry.path());
         if (paths.size() > 10000) {
@@ -618,8 +616,8 @@ int main(int argc, char** argv) {
         const Config config = parse(argc, argv);
         std::string database_sha256;
         Rules rules = config.compiled.empty()
-                              ? compile_rules(config.rule_paths)
-                              : load_compiled(config.compiled, database_sha256);
+                          ? compile_rules(config.rule_paths)
+                          : load_compiled(config.compiled, database_sha256);
         const int rule_count = checked_rule_count(rules.get());
         if (command == "compile") {
             if (config.output.empty() || !config.compiled.empty() ||
@@ -635,7 +633,7 @@ int main(int argc, char** argv) {
             if (config.compiled.empty() || !config.rule_paths.empty() ||
                 !config.target.empty() || !config.output.empty()) {
                 throw std::runtime_error(
-                        "verify requires --compiled and no target");
+                    "verify requires --compiled and no target");
             }
             std::cout << "{\"engine\":\"yara-x\",\"rules\":" << rule_count
                       << ",\"db_sha256\":"
@@ -644,7 +642,7 @@ int main(int argc, char** argv) {
         }
         if (config.target.empty() || !config.output.empty()) {
             throw std::runtime_error(
-                    "scan needs FILE_OR_DIRECTORY, not --output");
+                "scan needs FILE_OR_DIRECTORY, not --output");
         }
         const auto paths = discover(config.target, config.recursive);
         std::vector<Report> reports(paths.size());
@@ -672,12 +670,10 @@ int main(int argc, char** argv) {
                 Scanner scanner(pointer);
                 CallbackState context{};
                 context.global_hits = &global_hits;
-                if (yrx_scanner_set_timeout(scanner.get(),
-                                            config.timeout_seconds) !=
-                            YRX_SUCCESS ||
+                if (yrx_scanner_set_timeout(
+                        scanner.get(), config.timeout_seconds) != YRX_SUCCESS ||
                     yrx_scanner_max_matches_per_pattern(
-                            scanner.get(), config.max_per_pattern) !=
-                            YRX_SUCCESS) {
+                        scanner.get(), config.max_per_pattern) != YRX_SUCCESS) {
                     mark_error("cannot set YARA-X scanner limits");
                     return;
                 }
@@ -689,8 +685,8 @@ int main(int argc, char** argv) {
                 while (true) {
                     const std::size_t index = next.fetch_add(1);
                     if (index >= paths.size()) break;
-                    reports[index] = process(paths[index], scanner.get(),
-                                             context, config);
+                    reports[index] =
+                        process(paths[index], scanner.get(), context, config);
                 }
             } catch (...) {
                 std::lock_guard<std::mutex> lock(worker_error_mutex);
@@ -700,7 +696,7 @@ int main(int argc, char** argv) {
 
         // jthread provides exception-safe cleanup during partial construction.
         const std::size_t count =
-                std::min<std::size_t>(config.threads, paths.size());
+            std::min<std::size_t>(config.threads, paths.size());
         std::vector<std::jthread> workers;
         workers.reserve(count);
         for (std::size_t index = 0; index < count; ++index) {
@@ -728,9 +724,9 @@ int main(int argc, char** argv) {
             }
         }
         const bool incomplete = std::any_of(
-                reports.begin(), reports.end(), [](const Report& report) {
-                    return !report.error.empty() || report.truncated;
-                });
+            reports.begin(), reports.end(), [](const Report& report) {
+                return !report.error.empty() || report.truncated;
+            });
         return incomplete ? 2 : 0;
     } catch (const std::exception& error) {
         std::cerr << "vulnimprint-scan: " << error.what() << '\n';

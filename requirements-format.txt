@@ -1,2 +1,3 @@
-# Google Python formatting preset. C++ uses clang-format 19.x separately.
+# Native C++ clang-format executable and Google-preset Python formatter.
+clang-format
 yapf==0.43.0

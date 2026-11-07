@@ -1,6 +1,3 @@
-# Google clang-format preset with repository-wide four-space indentation.
+# Google C++ style, with 4-space indentation.
 BasedOnStyle: Google
-Language: Cpp
 IndentWidth: 4
-ContinuationIndentWidth: 8
-ColumnLimit: 80

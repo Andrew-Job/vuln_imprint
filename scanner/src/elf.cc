@@ -37,8 +37,8 @@ constexpr std::size_t kVersionIndex = 6;
 class MemoryStreamBuf final : public std::streambuf {
    public:
     explicit MemoryStreamBuf(const std::vector<std::uint8_t>& bytes) {
-        auto* begin = reinterpret_cast<char*>(
-                const_cast<std::uint8_t*>(bytes.data()));
+        auto* begin =
+            reinterpret_cast<char*>(const_cast<std::uint8_t*>(bytes.data()));
         setg(begin, begin, begin + bytes.size());
     }
 
@@ -183,7 +183,7 @@ std::vector<Segment> executable_regions(const std::vector<std::uint8_t>& file) {
         reader.get_machine() != ELFIO::EM_X86_64 ||
         reader.get_elf_version() != ELFIO::EV_CURRENT) {
         throw std::runtime_error(
-                "Only little-endian ELF64 x86-64 is supported");
+            "Only little-endian ELF64 x86-64 is supported");
     }
     const auto type = reader.get_type();
     if (type != ELFIO::ET_EXEC && type != ELFIO::ET_DYN &&
@@ -232,9 +232,9 @@ std::vector<Segment> executable_regions(const std::vector<std::uint8_t>& file) {
                 continue;
             }
             regions.push_back(
-                    {static_cast<std::size_t>(segment->get_offset()),
-                     static_cast<std::size_t>(segment->get_file_size()),
-                     segment->get_virtual_address()});
+                {static_cast<std::size_t>(segment->get_offset()),
+                 static_cast<std::size_t>(segment->get_file_size()),
+                 segment->get_virtual_address()});
         }
     }
     if (regions.empty()) {

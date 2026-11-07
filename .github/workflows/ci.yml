@@ -13,18 +13,14 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
-      - name: Install upstream Google-style formatting tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-format-19
-          python -m pip install -r requirements-format.txt
-      - name: Verify complete first-party source formatting
-        run: make CLANG_FORMAT=clang-format-19 format-check
+      - name: Install C++ and Python formatters
+        run: python -m pip install -r requirements-format.txt
+      - name: Check first-party source formatting
+        run: make format-check
   offline:
     runs-on: ubuntu-22.04
     steps:
@@ -73,8 +69,6 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with: {python-version: '3.12'}
-      - name: Verify Git submodule lock
-        run: python scripts/verify_dependencies.py --require-checkout
       - name: System build dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential clang cmake ninja-build pkg-config libssl-dev binutils
       - name: Install pinned Python testing dependencies
@@ -84,8 +78,6 @@ jobs:
           sudo apt-get install -y gcc-11 gcc-12 clang-14 clang-15
           python -m tools.check_toolchain_matrix --out /tmp/vulnimprint-toolchains.json
           python -m pytest -q tests_release/test_toolchain_versions.py
-      # Execute all YARA-X-independent native checks before the expensive
-      # Rust/C++ builds; failures here should not cost a full upstream rebuild.
       - name: Preflight ELFIO boundary, fuzzing, JSON and static ELF admission
         run: |
           python -m pytest -q \
@@ -93,16 +85,13 @@ jobs:
             tests_integration/test_elfio_adapter_fuzz.py \
             tests_integration/test_native_json_serialization.py \
             tests_integration/test_static_product_elf_admission.py
-      # The checkout's exact Git commit participates in the cache key. A cache
-      # never substitutes for checking out and validating the upstream sources.
       - name: Identify the pinned upstream build inputs
         id: upstream_sha
         run: echo "value=$(git -C external/yara-x rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      # Official first-party GitHub cache. Restore prior compiled Rust outputs,
-      # but always run cargo cinstall, CMake and all integration tests.
-      - name: Restore pinned Rust tool and YARA-X build cache
+      - name: Restore pinned YARA-X Cargo build cache
         id: rust_cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
         with:
           path: |
             ~/.cargo/bin/cargo-capi
@@ -111,21 +100,22 @@ jobs:
             ~/.cargo/bin/cargo-ctest
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
+            ~/.cargo/registry/index
             ~/.cargo/registry/cache
-            ~/.cargo/git/db
             external/yara-x/target
-          key: ${{ runner.os }}-${{ runner.arch }}-ubuntu-22.04-rust-1.99.1-cargo-c-0.10.26-yarax-${{ steps.upstream_sha.outputs.value }}-${{ hashFiles('external/yara-x/Cargo.lock') }}-v1
-      - name: Build official YARA-X from the pinned recursive Git checkout and run C API smoke
+          key: ${{ runner.os }}-${{ runner.arch }}-ubuntu-22.04-rust-1.99.1-cargo-c-0.10.26-maturin-1.16.0-python-3.12-yarax-${{ steps.upstream_sha.outputs.value }}-${{ hashFiles('external/yara-x/Cargo.lock', 'scripts/bootstrap_yarax.sh', 'scripts/build_yarax_python.sh') }}-v2
+      - name: Build pinned YARA-X C API from the recursive Git checkout
         run: |
-          bash scripts/bootstrap_yarax.sh
+          bash scripts/bootstrap_yarax.sh --capi-only
           echo "PKG_CONFIG_PATH=$HOME/.local/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$HOME/.local/lib" >> "$GITHUB_ENV"
-      # Save immediately after successful upstream/C++ smoke. A later test
-      # failure must not discard the already-built Rust dependencies.
-      # Only trusted main pushes can populate caches shared with PRs.
-      - name: Save pinned Rust build cache for subsequent CI runs
+      - name: Build Python YARA-X bindings from the same pinned upstream source
+        run: bash scripts/build_yarax_python.sh
+      - name: Save complete pinned YARA-X Cargo build cache
+        id: rust_cache_save
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.rust_cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
         with:
           path: |
             ~/.cargo/bin/cargo-capi
@@ -134,18 +124,19 @@ jobs:
             ~/.cargo/bin/cargo-ctest
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
+            ~/.cargo/registry/index
             ~/.cargo/registry/cache
-            ~/.cargo/git/db
             external/yara-x/target
           key: ${{ steps.rust_cache.outputs.cache-primary-key }}
-      - name: Build Python YARA-X bindings from the same pinned upstream source
+      - name: Build VulnImprint scanner and smoke-test the real YARA-X C API
         run: |
-          bash scripts/build_yarax_python.sh
-          python -m pytest -q tests_integration/test_native_yara_x_factory.py
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 2
+          python3 scripts/native_yarax_smoke.py --scanner build/scanner/vulnimprint-scan
+      - name: Test Python YARA-X factory integration
+        run: python -m pytest -q tests_integration/test_native_yara_x_factory.py
       - name: Execute complete native-dependent regression suite
         run: python -m pytest -q tests tests_release tests_integration
-      - name: Repeat native integration against real upstream C API (no test stubs)
-        run: python scripts/native_yarax_smoke.py --scanner build/scanner/vulnimprint-scan
       - name: Admit complete Git CVE tree against independent specimens
         env:
           VULNIMPRINT_CORPUS_HOST: ${{ vars.VULNIMPRINT_CORPUS_HOST }}

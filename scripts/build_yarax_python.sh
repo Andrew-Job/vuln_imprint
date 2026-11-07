@@ -8,6 +8,7 @@ python3 scripts/verify_dependencies.py --require-checkout
 # Keep maturin on the exact Rust toolchain used for the C API build.
 export RUSTUP_TOOLCHAIN=1.99.1
 rustup run "$RUSTUP_TOOLCHAIN" cargo --version >/dev/null
+export CARGO_TARGET_DIR="$root/external/yara-x/target"
 python3 -m pip install 'maturin==1.16.0'
 wheels="$(mktemp -d)"
 trap 'rm -rf "$wheels"' EXIT
