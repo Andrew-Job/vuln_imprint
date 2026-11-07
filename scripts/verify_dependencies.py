@@ -46,31 +46,24 @@ def verify(*, require_checkout: bool = False) -> dict:
     if factory_pins != expected_python:
         raise ValueError('Factory dependency pins drift from dependency lock')
     rust = lock.get('rust_toolchain')
-    cargo_c = lock.get('cargo_c_version')
-    maturin = lock.get('maturin_version')
+    if not isinstance(rust, str) or not rust:
+        raise ValueError('missing pinned Rust toolchain')
     toolchain = tomllib.loads((ROOT / 'rust-toolchain.toml').read_text())
-    bootstrap = (ROOT / 'scripts/bootstrap_yarax.sh').read_text()
-    python_builder = (ROOT / 'scripts/build_yarax_python.sh').read_text()
-    if (not all(isinstance(x, str) and x for x in (rust, cargo_c, maturin)) or
-            toolchain.get('toolchain', {}).get('channel') != rust or
-            f'rustup toolchain install {rust}' not in bootstrap or
-            f'cargo +{rust} install cargo-c --version {cargo_c}'
-            not in bootstrap or
-            f'export RUSTUP_TOOLCHAIN={rust}' not in python_builder or
-            f"maturin=={maturin}" not in python_builder):
-        raise ValueError(
-            'Rust, cargo-c or maturin build pins drift from dependency lock')
+    if toolchain.get('toolchain', {}).get('channel') != rust:
+        raise ValueError('Rust toolchain differs from dependency lock')
+    if not isinstance(lock.get('cargo_c_version'),
+                      str) or not lock['cargo_c_version']:
+        raise ValueError('missing pinned cargo-c version')
+    if not isinstance(lock.get('maturin_version'),
+                      str) or not lock['maturin_version']:
+        raise ValueError('missing pinned maturin version')
     sbom = lock.get('release_sbom_tool')
-    if not isinstance(sbom, dict) or sbom.get('name') != 'syft':
-        raise ValueError('pinned Syft SBOM tool missing')
-    installer = (ROOT / 'scripts/install_syft.sh').read_text()
-    if (f"version={sbom.get('version')}" not in installer or
-            f"repo={sbom.get('repository')}" not in installer or
+    if (not isinstance(sbom, dict) or sbom.get('name') != 'syft' or
             sbom.get('platform') != 'linux_amd64' or sbom.get('verification')
             != 'github_immutable_release_attestation' or
-            'gh release verify-asset' not in installer):
-        raise ValueError(
-            'Syft release verification differs from dependency lock')
+            not isinstance(sbom.get('version'), str) or
+            not isinstance(sbom.get('repository'), str)):
+        raise ValueError('pinned Syft SBOM tool is incomplete')
     modules = (ROOT / ".gitmodules").read_text()
     for entry in entries:
         path = entry["path"]

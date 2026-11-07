@@ -8,34 +8,41 @@ Python 3.12+, Rust 1.99.1, `cargo-c` 0.10.26 and the pinned Git submodules:
 ELFIO 3.12 and YARA-X 1.23.0. The native scanner uses the official YARA-X
 C API and does not support an alternative matching engine.
 
-A source archive containing YARA-X is **not** a built YARA-X library. The
-native build uses Cargo and the upstream `Cargo.lock` to resolve Rust crates,
-compiles `libyara_x_capi.a` with the upstream `release-lto` profile, then
-statically links the C++ scanner against it. The initial build requires the pinned Rust toolchain, Cargo crates and
-Git submodules. The source archives alone do not provide a built C API.
+A source archive does not contain a compiled C API. VulnImprint builds
+`libyara_x_capi.a` from the pinned YARA-X submodule using its `release-lto`
+Cargo profile, then links the C++ Scanner against the resulting static library.
+Building from source requires the Rust toolchain and Cargo crates.
 
 ```bash
 git clone --recurse-submodules https://github.com/Andrew-Job/vuln_imprint.git
 cd vuln_imprint
 python3 -m pip install -r requirements-dev.txt
+rustup toolchain install 1.99.1 --profile minimal
+cargo +1.99.1 install cargo-c --version 0.10.26 --locked
 bash scripts/bootstrap_yarax.sh
 bash scripts/build_yarax_python.sh
 make test-native
 ```
 
-`bootstrap_yarax.sh` initializes the submodules, obtains the pinned Rust toolchain
-and `cargo-c`, builds and installs the official YARA-X C API, builds the
-scanner through CMake and runs `scripts/native_yarax_smoke.py` against the
-real engine. It installs the library under `${YARAX_PREFIX:-$HOME/.local}`;
-the script exports `PKG_CONFIG_PATH` to locate its static linking metadata.
-For a later manual CMake invocation, set `PKG_CONFIG_PATH` to the installed
-`lib/pkgconfig` directory. No YARA-X `LD_LIBRARY_PATH` is necessary.
+`bootstrap_yarax.sh` builds and installs the pinned YARA-X C API, builds the
+Scanner with CMake, and runs a native integration smoke test. Use `--capi-only`
+to build only the C API. The script expects initialized Git submodules and an
+installed Rust toolchain with `cargo-c`; it does not modify the toolchain or
+fetch Git sources. The library is installed under
+`${YARAX_PREFIX:-$HOME/.local}`. For direct CMake invocation, point
+`PKG_CONFIG_PATH` to that prefix's `lib/pkgconfig` directory. The Scanner
+has no dynamic `libyara_x_capi.so` dependency.
 
 `build_yarax_python.sh` builds the Python binding from the same pinned YARA-X
-source for Factory integration. An independently downloaded YARA-X wheel or
-a simulated matcher is not an acceptable substitute for this integration.
-To build only the C API before invoking CMake directly, use
-`bash scripts/bootstrap_yarax.sh --capi-only`.
+source using Maturin. It uses the `release-lto` Cargo profile and the same
+target directory as the C API to reuse compiled Rust dependencies. An
+independently downloaded Python wheel is not used for this integration.
+
+CI installs Rust once using a dedicated GitHub Action and installs the pinned
+`cargo-c` once per runner. `Swatinem/rust-cache` caches Cargo downloads,
+installed tools and reusable dependency artifacts. Only `main` writes this
+cache; pull requests and tag builds restore available entries. A cache miss
+never changes the requested dependency versions or the test contract.
 
 ## First-party formatting
 

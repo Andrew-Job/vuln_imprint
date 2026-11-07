@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Install the exact upstream Syft release, checking immutable release provenance.
 set -euo pipefail
-version=1.57.0
-repo=anchore/syft
+# Dependency lock is the single source of truth for the release SBOM tool.
+release="$(python3 -c 'import json; from pathlib import Path; c=json.loads(Path("external/DEPENDENCIES.json").read_text())["release_sbom_tool"]; assert c["name"] == "syft" and c["platform"] == "linux_amd64"; print(c["version"], c["repository"])')"
+read -r version repo <<< "$release"
 [[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] || {
   echo 'Syft release is for Linux x86-64' >&2; exit 2;
 }
+command -v gh >/dev/null || { echo 'GitHub CLI required for Syft release verification' >&2; exit 2; }
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 archive="syft_${version}_linux_amd64.tar.gz"
@@ -26,3 +28,4 @@ printf '%s  %s\n' "$expected" "$work/$archive" | sha256sum --check --status
 mkdir -p "$HOME/.local/bin"
 tar -xzf "$work/$archive" -C "$work" syft
 install -m 0755 "$work/syft" "$HOME/.local/bin/syft"
+"$HOME/.local/bin/syft" version

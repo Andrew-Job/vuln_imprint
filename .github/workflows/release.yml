@@ -8,18 +8,15 @@ concurrency:
   group: vulnimprint-release
   cancel-in-progress: false
 jobs:
-  # Unprivileged build job: source of truth is the protected Git tree.
+  # Unprivileged build job: build exactly the checked-out tagged commit.
   # It has no permission to publish releases or mint OIDC credentials.
   build-and-validate:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     permissions:
       contents: read
-      actions: read
-      attestations: read
     outputs:
       version: ${{ steps.source.outputs.version }}
-      source_sha: ${{ steps.source.outputs.source_sha }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -37,29 +34,21 @@ jobs:
         run: |
           [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
-          printf 'version=%s\nsource_sha=%s\n' "$GITHUB_REF_NAME" "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
-      - name: Restore YARA-X build cache from main
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+          printf 'version=%s\n' "$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # Rust toolchain action (toolchain 1.99.1)
         with:
-          path: |
-            ~/.cargo/bin/cargo-capi
-            ~/.cargo/bin/cargo-cbuild
-            ~/.cargo/bin/cargo-cinstall
-            ~/.cargo/bin/cargo-ctest
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/registry/src
-            ~/.cargo/git
-            external/yara-x/target
-          key: ${{ runner.os }}-${{ runner.arch }}-rust-1.99.1-cargo-c-0.10.26-yarax-${{ hashFiles('external/DEPENDENCIES.json', 'external/yara-x/Cargo.lock') }}-v2
+          toolchain: '1.99.1'
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: external/yara-x -> target
+          shared-key: yarax-1.23.0-rust-1.99.1
+          key: cargo-c-0.10.26
+          save-if: false
+      - name: Install pinned cargo-c
+        run: cargo +1.99.1 install cargo-c --version 0.10.26 --locked
       - name: Build pinned official YARA-X and native scanner
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build pkg-config libssl-dev binutils
           bash scripts/bootstrap_yarax.sh
-          echo "PKG_CONFIG_PATH=$HOME/.local/lib/pkgconfig" >> "$GITHUB_ENV"
       - name: Compile all production-channel CVE records
         run: |
           python -m tools.production_db assemble --signatures signatures \
@@ -113,6 +102,7 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 30
+          compression-level: 0
 
   # Only publication has write and OIDC permissions. Source builds happen
   # in the preceding unprivileged job.
@@ -141,7 +131,7 @@ jobs:
       - name: Verify downloaded immutable candidate
         run: |
           (cd dist && sha256sum -c SHA256SUMS)
-          python -m tools.release_approval verify \
+          python3 -m tools.release_approval verify \
             --contents dist/release-contents.json --assets-dir dist
       - name: Attest SLSA provenance of all finalized release assets
         uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
@@ -182,6 +172,6 @@ jobs:
             --predicate-type https://spdx.dev/Document/v2.3 \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
           (cd downloaded && sha256sum -c ../dist/SHA256SUMS)
-          python -m tools.release_approval verify \
+          python3 -m tools.release_approval verify \
             --contents downloaded/release-contents.json --assets-dir downloaded
           gh release edit "$VERSION" --repo "$GITHUB_REPOSITORY" --verify-tag --draft=false
