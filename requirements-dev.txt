@@ -1,4 +1,4 @@
 -r requirements-factory.txt
-pytest==9.0.2
+pytest==9.2.0
 ## YARA-X Python bindings in CI are compiled from the pinned Git submodule.
 ## Use scripts/build_yarax_python.sh after recursive checkout.
