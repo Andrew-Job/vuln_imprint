@@ -24,7 +24,7 @@ YARA-X compilation, integrity and platform checks are mandatory; detection
 quality is investigated through per-record research and review (see
 [Database](../docs/DATABASE.md)).
 
-The libpng source tree currently has five CVEs with 25 production-channel
+The libpng source tree contains five CVEs with 25 production-channel
 machine patterns, plus one research-only CVE without a machine record.
 **The corpus roadmap is 100 distinct CVEs, then 1,000**, counted by CVEs with
 production-channel machine records rather than by individual patterns.
