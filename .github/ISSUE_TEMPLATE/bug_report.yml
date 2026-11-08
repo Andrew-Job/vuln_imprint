@@ -10,7 +10,7 @@ body:
     id: version
     attributes:
       label: VulnImprint release or commit
-      placeholder: v0.1.0 or full commit SHA
+      placeholder: Release tag or full commit SHA
     validations:
       required: true
   - type: textarea

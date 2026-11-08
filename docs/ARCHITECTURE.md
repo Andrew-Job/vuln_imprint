@@ -4,7 +4,7 @@ VulnImprint is an extensible, static, CVE-oriented binary signature scanner.
 Its platform model separates operating system, executable format, CPU
 architecture, bitness and ABI so that new scanner backends and signature
 profiles can be extended without conflating their coverage dimensions.
-The v0.1.0 scanner supports Linux ELF64 on little-endian x86-64 with
+The current Scanner supports Linux ELF64 on little-endian x86-64 with
 the System V AMD64 ABI. Matching uses the official YARA-X 1.23.0 C API;
 ELF metadata is parsed with ELFIO 3.12. Scanning does not execute or emulate the target.
 

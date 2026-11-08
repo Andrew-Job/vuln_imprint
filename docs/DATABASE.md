@@ -60,11 +60,12 @@ coverage or the absence of false positives. New manual records default to
 | `CVE-2026-46675` (research only) | 0 | 0 |
 | **Total: 6 CVEs** | **5** | **25** |
 
-All five machine records have the `production` inclusion channel. Research
-artifacts and machine anchors are available in
-`docs/research/libpng-elf64-x86_64/`. A separate per-record independent
-affected/fixed/backport validation remains a research goal; inclusion in the
-production database is not a statement that this review is complete.
+All five machine records have the `production` inclusion channel. The
+[libpng research dossier](research/libpng-elf64-x86_64/README.md) documents
+observations on nine real shared libraries: 36 expected pattern observations,
+and no unexpected matches across 230 unrelated ELF files. The dossier also
+records machine-code anchors, specimen hashes and affected/fixed control
+observations. Additional build variants can broaden CVE coverage.
 
 ## Platform profiles and future coverage
 

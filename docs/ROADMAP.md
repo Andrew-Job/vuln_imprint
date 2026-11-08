@@ -14,7 +14,7 @@ does not automatically publish a new version.
 
 | Milestone | Scope |
 |---|---|
-| **v0.1.0 baseline** | Five CVEs represented by production machine-code records (25 patterns); one additional research-only CVE |
+| **Current corpus** | Five CVEs represented by production machine-code records (25 patterns); one additional research-only CVE |
 | **First goal: 100 CVEs** | Grow the production corpus to 100 distinct CVEs with machine-code detection records |
 | **Next goal: 1,000 CVEs** | Continue expanding the production corpus across components and reproducible build variants |
 | **Ongoing work** | Add alternative patterns, test affected/fixed builds, review coverage gaps and maintain existing CVEs |
@@ -44,9 +44,9 @@ See [Contributing](../CONTRIBUTING.md), the
 ## 2. Platform and architecture expansion
 
 VulnImprint is designed to support multiple operating systems, binary formats,
-CPU architectures, word sizes and ABIs. The current v0.1.0 Scanner implements
+CPU architectures, word sizes and ABIs. The current Scanner implements
 Linux ELF64, little-endian x86-64, System V AMD64 ABI; the matching database
-and Factory currently target this profile.
+and Factory target this profile.
 
 | Direction | Opportunities for contributors |
 |---|---|
@@ -56,9 +56,9 @@ and Factory currently target this profile.
 | **Additional CPUs** | ARM, AArch64, other ISAs and endianness, disassembly and signature validation |
 | **More binary environments** | Other executable formats, ABIs, runtime and toolchain profiles |
 
-These are **contribution opportunities, not features already supported by
-v0.1.0**. The order depends on useful proposals and available implementations,
-not on a fixed platform-by-platform release schedule.
+These are **development directions**, while current runtime support is
+summarized in the README. The order depends on useful proposals and available
+implementations, not on a fixed platform-by-platform release schedule.
 
 ### A practical route to a new target
 

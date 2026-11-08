@@ -8,16 +8,14 @@ matched, including the original file offset. The native scanner and compiled
 signature database ship together; this repository also contains the tools for
 researching and contributing new signatures.
 
-**[Download v0.1.0](https://github.com/Andrew-Job/vuln_imprint/releases/tag/v0.1.0)** ·
 [Quick start](#quick-start) ·
 [Contribute a CVE](https://github.com/Andrew-Job/vuln_imprint/issues/new?template=cve_signature.yml) ·
 [Roadmap](docs/ROADMAP.md)
 
 ## Quick start
 
-Download these **four assets** from the
-[latest GitHub Release](https://github.com/Andrew-Job/vuln_imprint/releases/latest)
-into the same directory:
+From the repository's **Releases** section, download these four files from
+the same release into one directory:
 
 - `vulnimprint-linux-x86_64.tar.gz`
 - `SHA256SUMS`
@@ -45,7 +43,7 @@ including glibc and OpenSSL. For provenance and SBOM checks, see
 
 ## Current support
 
-| Component | v0.1.0 |
+| Component | Supported |
 |---|---|
 | OS and binary format | Linux ELF (`ET_REL`, `ET_EXEC`, `ET_DYN`) |
 | CPU and bitness | Little-endian x86-64, 64-bit |
@@ -55,9 +53,12 @@ including glibc and OpenSSL. For provenance and SBOM checks, see
 | Signature corpus | Five libpng CVEs, 25 machine-code patterns |
 
 The [CVE catalog](docs/DATABASE.md#current-source-catalog) lists the bundled
-coverage. CVE records are maintained independently, so contributors can add
-patterns for new vulnerabilities or for different compiled variants of an
-existing CVE.
+coverage. The libpng research includes **36 expected pattern observations**
+across real library specimens and **no unexpected matches on 230 unrelated
+ELF files**; methods and specimen details are in the
+[research report](docs/research/libpng-elf64-x86_64/README.md).
+CVE records are maintained independently, so contributors can add patterns
+for new vulnerabilities or different compiled variants of an existing CVE.
 
 ## Next steps
 
@@ -65,8 +66,8 @@ The immediate priority is to grow the production signature corpus toward
 **100 CVEs**, improve coverage across compilers and builds, and collect
 feedback from people scanning real binaries.
 
-A shorter command, **`vulnip`**, will be available alongside `vulnimprint` in a
-future release; `v0.1.0` uses the full command.
+The source tree also includes the shorter `vulnip` launcher for upcoming
+release packages; `vulnimprint` remains the standard command.
 
 The [roadmap](docs/ROADMAP.md) covers the longer-term goal of 1,000 CVEs and
 additional platforms: Windows/PE, macOS/Mach-O, Linux ELF32, ARM/AArch64 and
