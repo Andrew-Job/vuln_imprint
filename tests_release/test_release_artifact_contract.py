@@ -62,6 +62,7 @@ def test_product_archive_contains_self_contained_layout(tmp_path, monkeypatch):
         files = set(archive.getnames())
         for name in (
                 "vulnimprint/bin/vulnimprint",
+                "vulnimprint/bin/vulnip",
                 "vulnimprint/bin/vulnimprint-scan",
                 "vulnimprint/share/vulnimprint/db/database.yarc",
                 "vulnimprint/licenses/yara-x/LICENSE",
@@ -69,6 +70,11 @@ def test_product_archive_contains_self_contained_layout(tmp_path, monkeypatch):
                 "vulnimprint/share/vulnimprint/Cargo.lock",
         ):
             assert name in files
+        full = archive.extractfile("vulnimprint/bin/vulnimprint")
+        short = archive.extractfile("vulnimprint/bin/vulnip")
+        assert full is not None and short is not None
+        assert full.read() == short.read()
+        assert archive.getmember("vulnimprint/bin/vulnip").mode & 0o111
 
 
 def test_product_fails_when_bundled_runtime_cannot_be_verified(

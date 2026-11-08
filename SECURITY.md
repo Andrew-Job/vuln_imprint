@@ -7,16 +7,18 @@ The Factory does not sandbox external build recipes.
 
 ## Private vulnerability reports
 
-For security vulnerabilities in VulnImprint, use GitHub's private
-vulnerability reporting on the repository's **Security** tab. Do not post
-unpatched exploits, private specimens or credentials in public issues.
-Provide the affected commit/version, reproduction and impact if possible.
-No response-time SLA is promised.
+For security vulnerabilities **in VulnImprint itself**, use private
+vulnerability reporting under the repository's **Security** tab when enabled.
+If private reporting is unavailable, open a non-sensitive issue to request a
+secure reporting channel; do not disclose exploit details there. Do not
+post credentials, private specimens or unpatched exploits in public issues.
+Include the affected release/commit, reproduction and impact when possible.
 
-New or changed CVE detection claims require independent affected, fixed,
-backport and unrelated controls bound to the exact record and compiler
-profiles. A production inclusion channel is not evidence of accuracy: the
-production-channel records in this source tree have no independently
-reviewed evidence of CVE detection accuracy.
-Verify published assets with GitHub artifact attestations and SHA-256 checks
+CVE signature proposals, missed detections and unexpected matches belong in
+regular Issues or pull requests rather than private product vulnerability
+reports. Supporting affected/fixed, backport and unrelated build controls
+are valuable for assessing CVE detection quality; see
+[Contributing](CONTRIBUTING.md) and [Database](docs/DATABASE.md).
+
+Verify published assets with GitHub Artifact Attestations and SHA-256 checks
 before loading the database.

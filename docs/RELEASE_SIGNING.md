@@ -16,8 +16,8 @@ detection correctness.
 ## Consumer verification
 
 Download all four assets from the same published release, then verify the
-actual tag and publisher repository. The tag below is an example only;
-substitute the tag of the release being installed.
+actual tag and publisher repository. The commands below verify the first
+published release, `v0.1.0`; substitute the tag for later releases.
 
 ```bash
 for asset in vulnimprint-linux-x86_64.tar.gz \

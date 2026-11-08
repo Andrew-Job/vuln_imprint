@@ -1,9 +1,12 @@
 # Architecture
 
-VulnImprint is a static, CVE-oriented Linux ELF machine-code scanner. Its
-supported binary target is little-endian ELF64 x86-64, System V ABI.
-The execution engine is official YARA-X 1.23.0 (C API); ELF metadata is
-parsed by ELFIO 3.12. Scanner execution does not execute or emulate the target.
+VulnImprint is an extensible, static, CVE-oriented binary signature scanner.
+Its platform model separates operating system, executable format, CPU
+architecture, bitness and ABI so that new scanner backends and signature
+profiles can be extended without conflating their coverage dimensions.
+The v0.1.0 scanner supports Linux ELF64 on little-endian x86-64 with
+the System V AMD64 ABI. Matching uses the official YARA-X 1.23.0 C API;
+ELF metadata is parsed with ELFIO 3.12. Scanning does not execute or emulate the target.
 
 ```text
 Factory (Python): source provenance, builds, disassembly, pattern validation
@@ -24,7 +27,22 @@ Native Scanner (C++20, static YARA-X C API) + compiled DB + metadata
 verified release archive and separately attested release assets
 ```
 
-## Executable-range policy
+## Platform model and extension boundaries
+
+Every CVE-owned record carries `platform.os`, `platform.format`,
+`platform.arch`, `platform.bits` and `platform.abi`. Compiler/build profiles
+and signature alternatives describe additional coverage dimensions. The
+Scanner, Factory and database assembler currently implement and validate
+only the Linux ELF64 x86-64 SysV profile; adding a platform label alone
+does not create support for that platform.
+
+Windows PE, macOS Mach-O, Linux ELF32 and other architectures/ABIs are open
+community development directions. Each addition needs a format adapter,
+executable-range and offset semantics, relevant ISA/ABI research, database
+profile validation, product tests and distribution support. See the
+[Platform roadmap](ROADMAP.md) for contribution areas.
+
+## Executable-range policy (current Linux ELF backend)
 
 - `ET_REL`: bytes of sections with `SHF_EXECINSTR`.
 - `ET_EXEC` and `ET_DYN`: file-backed intersections of `SHF_EXECINSTR`
