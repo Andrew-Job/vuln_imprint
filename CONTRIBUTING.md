@@ -1,12 +1,11 @@
 # Contributing to VulnImprint
 
-The most useful contributions right now are **new CVE signatures**,
-additional binary/build variants and results from scanning real software.
-You can open an issue with a CVE and public reference, submit a machine-code
-rule or report a reproducible match. You do not need to build the Scanner to
-propose a CVE. Work on Windows, macOS, Linux ELF32 and other architectures or
-ABIs is also welcome; see the [roadmap](docs/ROADMAP.md) for platform
-opportunities and longer-term CVE coverage milestones.
+Contributions include **new CVE signatures**, additional binary/build
+variants, results from scanning real software, tooling improvements and
+platform backends. You can open an issue with a CVE and public reference,
+submit a machine-code rule or report a reproducible match. You do not need
+to build the Scanner to propose a CVE. See the [roadmap](docs/ROADMAP.md)
+for coverage goals and platform development directions.
 
 ## Ways to contribute
 
@@ -14,14 +13,14 @@ opportunities and longer-term CVE coverage milestones.
   signature, or add implementation/compiler variants to an existing CVE.
   Include affected code, public references, disassembly or reproducible builds
   where available. A research-only issue is a useful starting point too.
-- **Exercise real binaries.** Try the published Scanner on software you are
-  authorized to inspect. Report missed matches, unexpected matches or
+- **Exercise real binaries.** Try a published Scanner package on software you
+  are authorized to inspect. Report missed matches, unexpected matches or
   unclear diagnostics; provide a minimal reproducible case when possible.
-- **Extend platform coverage.** Windows PE, macOS Mach-O, Linux ELF32,
-  additional architectures and ABIs are welcome areas for development. See
-  the [roadmap](docs/ROADMAP.md). A new format or ABI needs changes
-  across the relevant scanner, Factory and database validation paths; merely
-  changing record metadata does not enable it.
+- **Extend platform coverage.** Contribute new executable-format adapters,
+  CPU architectures, ABIs and validation profiles. A new format or ABI needs
+  coordinated changes across Scanner, Factory and database validation;
+  changing record metadata alone does not enable it. See the
+  [roadmap](docs/ROADMAP.md).
 - **Improve implementation and documentation.** Propose focused changes to
   tests, packaging, Factory research or scanner behavior.
 
@@ -57,7 +56,7 @@ There are exactly two database inclusion channels:
 
 The channel determines packaging, not correctness or approval status.
 
-### Create a record for the current Linux target
+### Create a machine-code record
 
 For a manual machine-code rule, start with:
 
@@ -72,10 +71,10 @@ python -m tools.manual_rules init \
 
 The bytes are a **synthetic command example**, not a rule for that CVE.
 Use a distinct `--record-key` for additional independent records under one
-CVE. New manual records default to `test` and use the currently implemented
-Linux ELF64 x86-64 platform. The initializer generates schema-3 `pack.json`
-and canonical `rules-exec.yar` together. Commit both, and include evidence
-or reproduction instructions that support the proposed detection.
+CVE. New manual records default to `test`. The initializer generates a Linux
+ELF64 x86-64 record using the native implementation's profile and writes
+schema-3 `pack.json` and canonical `rules-exec.yar` together. Commit both,
+and include evidence or reproduction instructions supporting the detection.
 
 Source validation and native YARA-X compilation are required. CVE-specific
 quality is assessed using relevant affected, fixed, backport and unrelated

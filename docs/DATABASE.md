@@ -34,8 +34,8 @@ one CVE; patterns shared with another CVE are duplicated in a separate record.
 
 The example bytes are synthetic, **not** a CVE detector. Each `record_id`
 is globally unique, stable and deterministic. Its `record_sha256` covers the
-canonical content of that record independently of siblings in the same CVE.
-Each pattern has validated syntax, length and fixed-byte metadata.
+canonical content of that record independently of sibling records in the
+same CVE. Each pattern has validated syntax, length and fixed-byte metadata.
 
 There are exactly two inclusion channels:
 
@@ -48,36 +48,25 @@ Channel assignment makes no claim about accuracy, exploitability, compiler
 coverage or the absence of false positives. New manual records default to
 `test`. A research-only CVE creates no machine rules.
 
-## Current source catalog
+## CVE catalog and release coverage
 
-| CVE | Records | Patterns |
-|---|---:|---:|
-| `CVE-2026-22695` | 1 | 1 |
-| `CVE-2026-22801` | 1 | 4 |
-| `CVE-2026-25646` | 1 | 5 |
-| `CVE-2026-33416` | 1 | 10 |
-| `CVE-2026-34757` | 1 | 5 |
-| `CVE-2026-46675` (research only) | 0 | 0 |
-| **Total: 6 CVEs** | **5** | **25** |
+The maintained [CVE source tree](../signatures/README.md) is the source of
+truth for individual CVE records. Each published release carries an
+`index.json` describing the CVEs, records, channels and patterns included in
+that particular compiled database. Consult the corresponding release
+artifacts for its exact coverage rather than relying on a static count in
+this document.
 
-All five machine records have the `production` inclusion channel. The
-[libpng research dossier](research/libpng-elf64-x86_64/README.md) documents
-observations on nine real shared libraries: 36 expected pattern observations,
-and no unexpected matches across 230 unrelated ELF files. The dossier also
-records machine-code anchors, specimen hashes and affected/fixed control
-observations. Additional build variants can broaden CVE coverage.
+Research dossiers document reproducible observations and test specimens. For
+one such case, see the [libpng research dossier](research/libpng-elf64-x86_64/README.md).
 
-## Platform profiles and future coverage
+## Platform profiles
 
-`platform` has five explicit dimensions: `os`, `format`, `arch`, `bits` and
-`abi`. These fields make coverage identifiable per CVE record and provide
-a consistent basis for future Windows PE, macOS Mach-O, Linux ELF32 and
-other format/ABI contributions. The current assembler validates the one
-implemented Linux ELF64 x86-64 SysV profile. Extending the accepted profile
-set requires coordinated Scanner, Factory, source validation and native
-integration changes; a JSON metadata edit alone is insufficient.
-
-See [Platform roadmap](ROADMAP.md).
+`platform` has five dimensions: `os`, `format`, `arch`, `bits` and `abi`.
+The profile is part of each CVE record's detection scope. Extending the set of
+recognized profiles requires coordinated support in Scanner, Factory,
+source validation and native integration tests. A JSON metadata edit alone
+is insufficient. See the [Platform roadmap](ROADMAP.md).
 
 ## Review and assembly
 
@@ -86,8 +75,8 @@ explicit `sample_ids`, training lineages and controls for each record. A
 sibling record's finding does not satisfy a positive or negative control.
 The reviewer evaluates affected, fixed, backport and unrelated examples
 within each claimed compiler profile. Existing production records without
-reviewed evidence remain selectable for assembly; acceptance of newly changed
-records is separately reviewed.
+reviewed evidence remain selectable for assembly; acceptance of newly
+changed records is separately reviewed.
 
 ```bash
 python -m tools.production_db review --cases CASES \
@@ -98,7 +87,6 @@ python -m tools.production_db assemble --signatures signatures \
   --scanner build/scanner/vulnimprint-scan
 python -m tools.production_db verify --database build/db-test \
   --scanner build/scanner/vulnimprint-scan
-
 python -m tools.production_db assemble --signatures signatures \
   --channel production --output build/db-production \
   --scanner build/scanner/vulnimprint-scan
@@ -107,11 +95,12 @@ python -m tools.production_db verify --database build/db-production \
 ```
 
 `review` validates independent evidence without generating a database.
-`assemble` is the only release-database builder: it reads Git-tracked
+`assemble` is the only release database builder: it reads Git-tracked
 source and compiles with native YARA-X. Factory may create temporary
 research snapshots with `factory.database.merge_packs`; these are not
-release databases and cannot replace `assemble` artifacts. `verify` checks the built artifacts. Source structure and
-successful compilation alone do not validate CVE semantics.
+release databases and cannot replace `assemble` artifacts. `verify` checks
+the built artifacts. Source structure and successful compilation alone do
+not validate CVE semantics.
 
 The database format version is **1**; `pack.json` schema version is **3**.
 Database artifacts are:
@@ -126,9 +115,9 @@ Database artifacts are:
 | `SHA256SUMS` | Database payload checksums |
 
 A match identifies its CVE, `record_id`, pattern and file offset; `cve_count`
-is the number of unique CVEs with findings. The release ships a consistent
-scanner and database under `vulnimprint/share/vulnimprint/db/`, verified by
-the installed launcher. There is no separately supported database updater.
+is the number of unique CVEs with findings. Release packages contain a
+matching Scanner and database under `vulnimprint/share/vulnimprint/db/`,
+verified by the installed launcher.
 
 ## Manual authoring
 

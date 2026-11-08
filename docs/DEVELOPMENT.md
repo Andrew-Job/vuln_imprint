@@ -1,17 +1,18 @@
 # Development, native build and testing
 
-## Supported build environment
+## Reference native build environment
 
-Release builds target Ubuntu 24.04 x86-64. They require a C++20 compiler,
-CMake, Ninja, `pkg-config`, OpenSSL development headers, GNU binutils,
-Python 3.12+, Rust 1.99.1, `cargo-c` 0.10.26 and the pinned Git submodules:
-ELFIO 3.12 and YARA-X 1.23.0. The native scanner uses the official YARA-X
-C API and does not support an alternative matching engine.
+The release CI uses Ubuntu 24.04 x86-64, a C++20 compiler, CMake, Ninja,
+`pkg-config`, OpenSSL development headers, GNU binutils, Python 3.12+,
+Rust 1.99.1, `cargo-c` 0.10.26 and the pinned Git submodules ELFIO 3.12 and
+YARA-X 1.23.0. These are reproducible build dependencies, not a statement
+about the product's long-term platform coverage. The native Scanner uses
+the official YARA-X C API.
 
 A source archive does not contain a compiled C API. VulnImprint builds
 `libyara_x_capi.a` from the pinned YARA-X submodule using its `release-lto`
-Cargo profile, then links the C++ Scanner against the resulting static library.
-Building from source requires the Rust toolchain and Cargo crates.
+Cargo profile, then links the C++ Scanner against the resulting static
+library. Building from source requires the Rust toolchain and Cargo crates.
 
 ```bash
 git clone --recurse-submodules https://github.com/Andrew-Job/vuln_imprint.git
@@ -76,42 +77,41 @@ python -m tools.production_db verify --database build/db-test \
   --scanner build/scanner/vulnimprint-scan
 ```
 
-`make test` executes first-party Python functionality, database and packaging tests.
-`make test-native` additionally executes integration tests requiring the
-native ELFIO adapter and installed YARA-X Python binding. A skipped mandatory
-test is an error. The YARA-X C API smoke test is separately executed by
-`bootstrap_yarax.sh` and by native CI.
+`make test` executes first-party Python functionality, database and packaging
+tests. `make test-native` additionally executes integration tests requiring
+the native ELFIO adapter and installed YARA-X Python binding. A skipped
+mandatory test is an error. The YARA-X C API smoke test is separately
+executed by `bootstrap_yarax.sh` and by native CI.
 
-Native CI also compiles and scans a generated ELF using **the actual production
-CVE rules** to verify record identifiers, pattern offsets and executable-range
+Native CI compiles and scans a generated ELF using the actual production CVE
+rules to verify record identifiers, pattern offsets and executable-range
 selection. This verifies the adapter and concrete database content, not
 whether those patterns distinguish affected from fixed third-party binaries.
-
-The `scripts.check_signature_sources` source check validates the 25 production
-patterns and 15 recorded machine-code anchors. Native CI also compiles and
-scans these production rules using YARA-X. The libpng research dossier records
-36 expected pattern observations across real library specimens and zero
-unexpected matches among 230 unrelated ELF files; it documents the specimen
-set and matching method.
+The signature-source check validates production rule syntax and recorded
+machine-code anchors. Refer to the
+[research dossiers](research/libpng-elf64-x86_64/README.md) for specimen sets,
+validation methods and observations associated with specific investigations.
 
 The separate `production_db review` workflow accepts per-record affected,
-fixed and unrelated sample controls bound to each `record_sha256`. The current
-reviewed-corpus lock contains no cases; this structured review workflow is
-separate from the documented specimen research and the product's native tests.
+fixed and unrelated sample controls bound to each `record_sha256`. This
+structured review workflow is distinct from specimen research and the
+product's native integration tests.
 
 Install `requirements-coverage.txt` to collect coverage locally with
-`make test-coverage`. Coverage percentages do not establish CVE accuracy. Tests exercise VulnImprint
-behavior and failure modes, not dependencies or GitHub workflow settings.
+`make test-coverage`. Coverage percentages do not establish CVE accuracy.
+Tests exercise VulnImprint behavior and failure modes, not dependencies or
+GitHub workflow settings.
 
-For supported compiler research lanes, versions, provenance and independent
-holdout requirements, see [Toolchain matrix](TOOLCHAIN_MATRIX.md).
+For compiler research lanes, versions, provenance and independent holdout
+requirements, see [Toolchain matrix](TOOLCHAIN_MATRIX.md).
 
 ## Security and release boundaries
 
-The release workflow builds the production-channel records from the
-Git-tracked `signatures/` tree and packages the statically linked scanner and
-database together. The product does not carry a YARA-X `.so` dependency;
-compatible Linux system runtime libraries may remain dynamically linked.
+The release workflow assembles production-channel records from the
+Git-tracked `signatures/` tree and packages the statically linked Scanner
+and database together. The Scanner does not carry a YARA-X `.so` dependency;
+system runtime libraries may remain dynamically linked.
+
 Publishing requires a verified build and artifact attestations. GitHub
 branch, tag and environment protections are configured by repository
 administrators rather than rechecked by workflow scripts. The database
