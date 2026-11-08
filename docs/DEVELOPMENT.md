@@ -87,15 +87,17 @@ CVE rules** to verify record identifiers, pattern offsets and executable-range
 selection. This verifies the adapter and concrete database content, not
 whether those patterns distinguish affected from fixed third-party binaries.
 
-The `scripts.check_signature_sources` source check validates the retained
-25 production patterns and their 15 recorded original machine-code anchors
-without running YARA-X. Independent CVE accuracy requires affected, fixed,
-backport and unrelated sample controls bound to each `record_sha256`.
-`production_db review` checks those records independently. The current
-source tree contains no reviewed evidence artifacts, so independently confirmed CVE detection accuracy is not claimed. Independent
-corpus review is available through `python -m tools.production_db review`
-when reviewed evidence is supplied;
-the default CI does not execute an empty reviewed-corpus check.
+The `scripts.check_signature_sources` source check validates the 25 production
+patterns and 15 recorded machine-code anchors. Native CI also compiles and
+scans these production rules using YARA-X. The libpng research dossier records
+36 expected pattern observations across real library specimens and zero
+unexpected matches among 230 unrelated ELF files; it documents the specimen
+set and matching method.
+
+The separate `production_db review` workflow accepts per-record affected,
+fixed and unrelated sample controls bound to each `record_sha256`. The current
+reviewed-corpus lock contains no cases; this structured review workflow is
+separate from the documented specimen research and the product's native tests.
 
 Install `requirements-coverage.txt` to collect coverage locally with
 `make test-coverage`. Coverage percentages do not establish CVE accuracy. Tests exercise VulnImprint

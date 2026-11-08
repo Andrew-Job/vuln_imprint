@@ -1,6 +1,8 @@
 # Libpng ELF64 x86-64 machine-code signature research
 
-**Database channel: `production`. This is an inclusion assignment only; detector correctness has not yet been independently established.**
+**Five production CVE records, 25 machine-code patterns.** This research
+records matches and control observations on real libpng binaries; see the
+measurements and specimen inventory below.
 
 ## Delivery
 
@@ -64,6 +66,6 @@ an executable `PT_LOAD`. It also enforces positive and fixed-control results
 and prints the result to standard output. It does not verify complete CVE semantics,
 source-lineage independence or official YARA-X runtime compatibility.
 
-The source pack can be compiled into the production database, but compilation
-and channel assignment do not establish detection correctness. Treat the
-patterns as hypotheses until the separate CVE-specific analyses are complete.
+The recorded patterns cover the observed compiled libpng implementations.
+Further compiler, optimization and backport variants can extend that coverage;
+the observed results and methods are preserved above for reproducibility.
