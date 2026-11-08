@@ -7,7 +7,7 @@ Describe the affected first-party component or CVE and explain the change.
 - [ ] Each DB record belongs to exactly one CVE
 - [ ] Every `record_id` is stable and globally unique
 - [ ] Every record uses only the `test` or `production` channel
-- [ ] Reused byte patterns are duplicated as independent records per CVE; no cross-CVE links remain
+- [ ] Reused byte patterns have separate CVE-owned records
 - [ ] `pack.json` and `rules-exec.yar` are consistent
 - [ ] Pattern bytes, lengths and fixed-byte counts are correct
 - [ ] Research-only CVEs retain `research.json` when no machine record exists

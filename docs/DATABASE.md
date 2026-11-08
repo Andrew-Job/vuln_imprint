@@ -60,11 +60,23 @@ coverage or the absence of false positives. New manual records default to
 | `CVE-2026-46675` (research only) | 0 | 0 |
 | **Total: 6 CVEs** | **5** | **25** |
 
-All five machine records have the `production` inclusion channel. Their
-independent CVE-detection accuracy has **not** been established by reviewed
-affected/fixed/backport controls. The recorded research results and machine
-anchors are in `docs/research/libpng-elf64-x86_64/`; that evidence must not be
-interpreted as an independent, complete CVE accuracy validation.
+All five machine records have the `production` inclusion channel. Research
+artifacts and machine anchors are available in
+`docs/research/libpng-elf64-x86_64/`. A separate per-record independent
+affected/fixed/backport validation remains a research goal; inclusion in the
+production database is not a statement that this review is complete.
+
+## Platform profiles and future coverage
+
+`platform` has five explicit dimensions: `os`, `format`, `arch`, `bits` and
+`abi`. These fields make coverage identifiable per CVE record and provide
+a consistent basis for future Windows PE, macOS Mach-O, Linux ELF32 and
+other format/ABI contributions. The current assembler validates the one
+implemented Linux ELF64 x86-64 SysV profile. Extending the accepted profile
+set requires coordinated Scanner, Factory, source validation and native
+integration changes; a JSON metadata edit alone is insufficient.
+
+See [Platform roadmap](ROADMAP.md).
 
 ## Review and assembly
 

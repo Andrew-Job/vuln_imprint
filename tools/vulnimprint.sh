@@ -2,6 +2,7 @@
 # Dependency-free user entrypoint for the supported Linux release bundle.
 set -eu
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+command_name=${0##*/}
 root=$(dirname -- "$here")
 scanner="$here/vulnimprint-scan"
 db="$root/share/vulnimprint/db"
@@ -13,7 +14,7 @@ case "${1:-}" in
   scan)
     shift
     if [ "$#" -eq 0 ]; then
-      printf 'Usage: vulnimprint scan [--json] [--recursive] FILE_OR_DIRECTORY\n' >&2
+      printf 'Usage: %s scan [--json] [--recursive] FILE_OR_DIRECTORY\n' "$command_name" >&2
       exit 2
     fi
     (cd "$db" && sha256sum --status --check SHA256SUMS) || {
@@ -26,7 +27,7 @@ case "${1:-}" in
     cat "$root/share/vulnimprint/RELEASE_VERSION"
     ;;
   *)
-    printf 'Usage: vulnimprint scan [--json] [--recursive] FILE_OR_DIRECTORY\n       vulnimprint version\n' >&2
+    printf 'Usage: %s scan [--json] [--recursive] FILE_OR_DIRECTORY\n       %s version\n' "$command_name" "$command_name" >&2
     exit 2
     ;;
 esac

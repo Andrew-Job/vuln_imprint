@@ -74,7 +74,10 @@ def build_product(database: Path, scanner: Path, version: str, out: Path):
         (root / 'licenses/yara-x').mkdir(parents=True)
         shutil.copy2(scanner, root / 'bin/vulnimprint-scan')
         source = Path(__file__).resolve().parent
-        shutil.copy2(source / 'vulnimprint.sh', root / 'bin/vulnimprint')
+        for command in ('vulnimprint', 'vulnip'):
+            # Both entrypoints execute the same launcher and share the scanner
+            # and database.  The existing full command remains supported.
+            shutil.copy2(source / 'vulnimprint.sh', root / 'bin' / command)
         project = source.parent
         upstream_license = project / 'external/yara-x/LICENSE'
         if not upstream_license.is_file():
@@ -95,7 +98,8 @@ def build_product(database: Path, scanner: Path, version: str, out: Path):
         shutil.copy2(project / 'LICENSE', root / 'licenses/VulnImprint-MIT.txt')
         shutil.copy2(project / 'THIRD_PARTY_NOTICE.md',
                      root / 'licenses/THIRD_PARTY_NOTICE.md')
-        (root / 'bin/vulnimprint').chmod(0o755)
+        for command in ('vulnimprint', 'vulnip'):
+            (root / 'bin' / command).chmod(0o755)
         (root / 'share/vulnimprint/RELEASE_VERSION').write_text(version + '\n')
         shutil.copytree(database, root / 'share/vulnimprint/db')
         # Static YARA-X must have no runtime SONAME dependency; compatible

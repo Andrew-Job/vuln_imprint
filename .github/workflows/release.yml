@@ -86,6 +86,8 @@ jobs:
           env -u PYTHONPATH \
             /tmp/vulnimprint-clean/vulnimprint/bin/vulnimprint version | grep -Fx "$VERSION"
           env -u PYTHONPATH \
+            /tmp/vulnimprint-clean/vulnimprint/bin/vulnip version | grep -Fx "$VERSION"
+          env -u PYTHONPATH \
             /tmp/vulnimprint-clean/vulnimprint/bin/vulnimprint scan --json \
             /tmp/vulnimprint-clean/vulnimprint/bin/vulnimprint-scan \
             >/tmp/vulnimprint-product-smoke.json

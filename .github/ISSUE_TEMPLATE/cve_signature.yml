@@ -1,0 +1,38 @@
+name: CVE signature / missing detection
+description: Propose a CVE, improve a machine-code rule, or report a missed or unexpected match.
+title: "cve: "
+body:
+  - type: input
+    id: cve
+    attributes:
+      label: CVE identifier
+      placeholder: CVE-YYYY-NNNN
+    validations:
+      required: true
+  - type: dropdown
+    id: request
+    attributes:
+      label: Contribution type
+      options:
+        - New CVE signature or research case
+        - Additional pattern / compiler profile
+        - Expected detection missing
+        - Unexpected match / potential false positive
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Affected component and evidence
+      description: Describe affected/fixed builds, machine-code pattern, references, compiler/ABI and reproduction where available.
+      placeholder: Include public references and reproducible steps; incomplete research is welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Binary platform and Scanner version
+      description: Include OS, binary format, CPU, bitness, ABI and VulnImprint release when known.
+  - type: markdown
+    attributes:
+      value: Do not upload confidential or unlicensed binaries. Report vulnerabilities in VulnImprint itself privately using the Security tab.

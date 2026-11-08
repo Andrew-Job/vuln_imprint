@@ -19,15 +19,19 @@ excluded from production releases and included in the test database. The test
 database is a superset: it contains both production and test records so that
 production detections remain covered by regression tests.
 
-The channel is an inclusion target, not a quality or correctness assertion.
-A production record is not thereby independently proven to detect the named
-CVE. Source structure, YARA-X compilation, integrity, and platform checks are
-mandatory; detection correctness is assessed in separate research and review.
+The channel controls inclusion, not evidence status. Source structure,
+YARA-X compilation, integrity and platform checks are mandatory; detection
+quality is investigated through per-record research and review (see
+[Database](../docs/DATABASE.md)).
 
-The current libpng source tree has five CVEs with 25 machine patterns, each
-currently in the `production` channel, plus one research-only CVE without a
-machine record. Those assignments make the records part of the current
-production database; they do not certify their detection accuracy.
+The v0.1.0 libpng source tree has five CVEs with 25 production-channel
+machine patterns, plus one research-only CVE without a machine record.
+**The corpus roadmap is 100 distinct CVEs, then 1,000**, counted by CVEs with
+production-channel machine records rather than by individual patterns.
+Contributions to this corpus are the immediate priority; build variants and
+platform backends are also welcome in parallel. See
+[Contributing](../CONTRIBUTING.md) and the
+[roadmap](../docs/ROADMAP.md).
 
 The release builder compiles
 every `production` record in the accepted Git tree. CI compiles both channels.
