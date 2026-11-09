@@ -19,7 +19,10 @@ def check(db_root: Path, project_root: Path) -> dict:
     from tools.manual_rules import check_manual_source
 
     packs = []
-    for path in sorted((project_root / 'signatures').glob('CVE-*/pack.json')):
+    baseline = ('CVE-2026-22695', 'CVE-2026-22801', 'CVE-2026-25646',
+                'CVE-2026-33416', 'CVE-2026-34757')
+    for cve in baseline:
+        path = project_root / 'signatures' / cve / 'pack.json'
         pack = json.loads(path.read_text(encoding='utf-8'))
         if pack.get('schema_version') != 3 or not pack.get('records'):
             raise ValueError(f'{path}: invalid CVE pack schema')

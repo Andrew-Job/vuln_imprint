@@ -30,8 +30,8 @@ def check() -> dict:
         sorted(path.name
                for path in SIGNATURES.glob("CVE-*")
                if path.is_dir() and (path / "pack.json").is_file()))
-    if actual != CVES:
-        raise ValueError("libpng machine-record CVE directory set has changed")
+    if not set(CVES).issubset(actual):
+        raise ValueError("baseline libpng CVE source is missing")
     packs = []
     for cve in CVES:
         folder = SIGNATURES / cve
@@ -50,7 +50,7 @@ def check() -> dict:
     pattern_count = sum(
         len(record["rules"]) for pack in packs for record in pack["records"])
     if pattern_count != 25:
-        raise ValueError("libpng machine pattern count has changed")
+        raise ValueError("baseline libpng machine patterns have changed")
     if (RESEARCH_DOSSIER / "database-exec.yar").read_text(
             encoding="utf-8") != source_from_packs(packs):
         raise ValueError("combined CVE source does not match checked records")

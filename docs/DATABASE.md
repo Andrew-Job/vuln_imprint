@@ -121,6 +121,10 @@ verified by the installed launcher.
 
 ## Manual authoring
 
+To obtain and screen new machine-code masks from either ready-made binaries or
+source-built ELF pairs, use the [CVE signature guide](CREATING_AND_VALIDATING_CVE_MASKS.md).
+The commands below only create the final CVE-owned database record.
+
 ```bash
 python -m tools.manual_rules init \
   --cve CVE-2026-12345 --record-key variant-a --channel test \

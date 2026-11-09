@@ -58,18 +58,20 @@ The channel determines packaging, not correctness or approval status.
 
 ### Create a machine-code record
 
-For a manual machine-code rule, start with:
+Follow [Creating and validating CVE masks](docs/CREATING_AND_VALIDATING_CVE_MASKS.md)
+for **prebuilt-binary or source-build routes** to select and validate a
+security-specific machine pattern. Then add the validated bytes to the database.
+For a manual machine-code record, use the mask prepared by the guide:
 
 ```bash
-python -m tools.manual_rules init \
-  --cve CVE-2022-37434 \
-  --record-key alternate-implementation \
-  --channel test \
-  --hex 'AA BB CC DD EE FF 00 11 22 33 44 55 66 77 88 99 00 11 22 33 44 55 66 77 88 99 00 11' \
-  --output run/cve-proposals/CVE-2022-37434
+CVE=CVE-YYYY-NNNN
+MASK="$(cat work/mask.hex)"
+python -m tools.manual_rules init --cve "$CVE" \
+  --record-key vulnerable-variant --channel test --hex "$MASK" \
+  --output "signatures/$CVE"
+python -m tools.manual_rules lint --directory "signatures/$CVE"
 ```
 
-The bytes are a **synthetic command example**, not a rule for that CVE.
 Use a distinct `--record-key` for additional independent records under one
 CVE. New manual records default to `test`. The initializer generates a Linux
 ELF64 x86-64 record using the native implementation's profile and writes

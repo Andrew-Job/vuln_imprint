@@ -33,7 +33,10 @@ def replay(db_root:Path,source_root:Path):
     from factory.yara_engine import source_from_packs
     from tools.manual_rules import check_manual_source
     packs=[];pats={}
-    for directory in sorted((source_root/'signatures').glob('CVE-*')):
+    baseline = ('CVE-2026-22695', 'CVE-2026-22801', 'CVE-2026-25646',
+                'CVE-2026-33416', 'CVE-2026-34757')
+    for cve in baseline:
+        directory = source_root / 'signatures' / cve
         if not directory.is_dir() or not (directory/'pack.json').is_file():continue
         pack=json.loads((directory/'pack.json').read_text())
         check_manual_source(pack,(directory/'rules-exec.yar').read_text())
