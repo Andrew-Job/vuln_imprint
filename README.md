@@ -12,6 +12,7 @@ distributed together. This repository also contains the Signature Factory and
 source records used to research, validate and contribute detections.
 
 [Quick start](#quick-start) ·
+[Create a CVE signature](docs/CREATING_AND_VALIDATING_CVE_MASKS.md) ·
 [Contribute a CVE](https://github.com/Andrew-Job/vuln_imprint/issues/new?template=cve_signature.yml) ·
 [Roadmap](docs/ROADMAP.md)
 
@@ -71,6 +72,9 @@ pipeline.
 [Propose a signature or report a missing match](https://github.com/Andrew-Job/vuln_imprint/issues/new?template=cve_signature.yml).
 A CVE identifier, public reference or reproducible binary test is enough to
 start a discussion; a finished machine-code signature is not required.
+
+To create a machine-code signature, follow the
+[step-by-step CVE guide](docs/CREATING_AND_VALIDATING_CVE_MASKS.md).
 
 Contributions can add CVE records, improve patterns across compiler and build
 variants, test detections on real binaries, extend executable-format and

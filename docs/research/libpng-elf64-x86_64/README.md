@@ -18,7 +18,7 @@ measurements and specimen inventory below.
 | CVEs with YARA source | 5 |
 | Machine patterns | 25 |
 | Actual libpng shared libraries | 9 |
-| Recorded mask-index observations | **36 / 36** |
+| Recorded mask-index observations | **45 / 45** |
 | Unrelated real ELF files | **230** |
 | Unexpected unrelated matches | **0** |
 | Matches for CVE-2026-33416 and CVE-2026-34757 | All hits inside expected named functions |
@@ -34,6 +34,105 @@ The seven affected-path specimens are not independently source-proven rebuilds. 
 **CVE-2026-34757:** before the fix `png_set_hIST` can free the stored buffer before reading from a caller-supplied pointer which aliases it. In the patched control, a stack-backed copy is made first. The markers capture specific vulnerable compiled paths, not arbitrary calls to `png_free_data`. Source: [upstream advisory](https://www.openwall.com/lists/oss-security/2026/04/09/2), [Debian CVE tracker](https://security-tracker.debian.org/tracker/CVE-2026-34757).
 
 **CVE-2026-46675:** the 1.6.59 patch introduces `png_inflate_detach_buffers` and calls it at stream-release points. A patch must be contrasted with actual fixed/unfixed executable paths: absent instructions cannot themselves be a positive YARA signature. No synthetic signature was invented for this CVE. [Upstream fix](https://github.com/pnggroup/libpng/commit/aa77ef38c17ab2fc1b41bec09fb973c6a386641d).
+
+## Binary-first CVE screening replay
+
+The existing **CVE-2026-33416** record was replayed directly against
+SHA-pinned, real prebuilt ELF libraries (no source recompilation). The
+preliminary reference matcher confirmed **7/7 affected-path matches**, **2/2
+fixed-path non-matches** and **24/24 unrelated ELF non-matches**; 17 concrete
+file-offset hits were recorded. Inputs and results:
+
+- [`binary-first-CVE-2026-33416.samples.json`](binary-first-CVE-2026-33416.samples.json)
+- [`evidence/binary-first-CVE-2026-33416.reference.json`](evidence/binary-first-CVE-2026-33416.reference.json)
+
+A narrower demonstration extracts a single security-relevant `png_set_PLTE`
+mask from the RDKit binary, checks it against one affected, one patched and
+one unrelated ELF, and creates a schema-3 CVE-owned **test** record using
+`tools.manual_rules init`. Its control matrix and report are
+[`binary-first-CVE-2026-33416.single-mask.samples.json`](binary-first-CVE-2026-33416.single-mask.samples.json)
+and [`evidence/binary-first-CVE-2026-33416.single-mask.reference.json`](evidence/binary-first-CVE-2026-33416.single-mask.reference.json).
+This single-mask record is a reproducible authoring demonstration and is
+**not** committed as a duplicate of the existing production record.
+
+Run the full example from the project root:
+
+```bash
+python -m tools.binary_samples --cve CVE-2026-33416 \
+  --pack signatures/CVE-2026-33416/pack.json \
+  --samples docs/research/libpng-elf64-x86_64/binary-first-CVE-2026-33416.samples.json \
+  --output work/CVE-2026-33416-reference.json
+```
+
+This is only reference byte matching over executable ELF segments. The
+sample paths point to specific SHA-256-pinned third-party installations; the
+upstream binary producer and complete source lineage were not independently
+attested. Neither YARA-X nor native Scanner was executed in this new replay.
+For end-to-end source-to-production admission, follow
+[Creating and validating CVE masks](../../CREATING_AND_VALIDATING_CVE_MASKS.md).
+
+## Two additional CVE records: real prebuilt binaries (2025)
+
+The original five-CVE research corpus above is unchanged. Two **new**, separately
+maintained production-channel records were added using the binary-first path
+in [the contributor guide](../../CREATING_AND_VALIDATING_CVE_MASKS.md):
+
+| CVE | Vulnerable code | Fix | Patterns | Affected / fixed / backport / unrelated |
+|---|---|---|---:|---:|
+| [CVE-2025-64505](https://www.cve.org/CVERecord?id=CVE-2025-64505) | `png_set_quantize` allocates `quantize_index` using `num_palette` | Allocate 256 bytes to cover the full 8-bit palette-index space | 4 | 5 / 2 / 1 / 232 |
+| [CVE-2025-64506](https://www.cve.org/CVERecord?id=CVE-2025-64506) | `png_image_write_main` condition routes 8-bit input into the 16-bit conversion path | Correct the combined `linear`, `alpha` and `convert_to_8bit` guard | 3 | 5 / 2 / 1 / 232 |
+
+Both vulnerabilities were fixed in **libpng 1.6.51**, released on
+**2025-11-21**. Their upstream fixing commits are
+[`6a528eb5fd0dd7f6de1c39d30de0e41473431c37`](https://github.com/pnggroup/libpng/commit/6a528eb5fd0dd7f6de1c39d30de0e41473431c37)
+(64505) and
+[`2bd84c019c300b78e811743fbcddb67c9d9bf821`](https://github.com/pnggroup/libpng/commit/2bd84c019c300b78e811743fbcddb67c9d9bf821)
+(64506). Compare the exact affected instruction blocks with these fixes
+before editing the masks.
+
+**Inputs.** Five affected bundled-libpng ELF builds were taken from
+`rdkit==2025.9.4`, `pedalboard==0.9.23`, `fiona==1.10.1`,
+`cadquery-ocp==7.9.3.1.1` and `torchvision==0.25.0+cpu`.
+The fixed builds came from `pillow==12.3.0` and
+`opencv-python==4.13.0.92`. A Debian `libpng16-16t64` security-backport
+build was tested separately. There were also **232 unrelated real ELF
+controls**. The manifests pin **SHA-256 for every file** and document
+each sample's source and classification. These are diverse package builds,
+not proven independent compiler/source reproduction lineages.
+
+**Replay the committed masks** after obtaining the exact binaries from the
+indicated packages and updating local paths in a private copy of each
+sample manifest (without modifying the pinned SHA-256):
+
+```bash
+python -m tools.binary_samples --cve CVE-2025-64505 \
+  --pack signatures/CVE-2025-64505/pack.json \
+  --samples docs/research/libpng-elf64-x86_64/binary-first-CVE-2025-64505.extended.samples.json \
+  --output work/CVE-2025-64505.json
+
+python -m tools.binary_samples --cve CVE-2025-64506 \
+  --pack signatures/CVE-2025-64506/pack.json \
+  --samples docs/research/libpng-elf64-x86_64/binary-first-CVE-2025-64506.extended.samples.json \
+  --output work/CVE-2025-64506.json
+```
+
+The frozen reference results are
+[`CVE-2025-64505`](evidence/CVE-2025-64505.extended.source-pack.json)
+and
+[`CVE-2025-64506`](evidence/CVE-2025-64506.extended.source-pack.json).
+Both returned **PASS_PRELIMINARY** on all 240 pinned ELF files. For the first
+record, the five affected-library hit file offsets are
+`83194, 83232, 99170, 82700, 85509`; for the second, they are
+`145967, 146047, 200925, 147826, 158972`, ordered as the sample matrices.
+
+**Pre-alpha acceptance status.** Both records have `channel=production` for
+release inclusion. Their evidence reports explicitly set
+`native_yara_x_executed=false` and `production_admission=false`: the test
+above is direct byte matching inside executable `PT_LOAD` ranges, not a
+YARA-X runtime or native Scanner validation. Do not interpret channel
+selection as a reviewed accuracy claim. Before a verified release, run
+`tools.production_db review/assemble/verify` and the native Scanner across
+the same controls using the instructions in [Database](../../DATABASE.md).
 
 ## Reproduction
 
