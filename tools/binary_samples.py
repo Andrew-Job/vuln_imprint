@@ -32,10 +32,11 @@ def _executable_regions(path: Path) -> list[tuple[int, bytes]]:
             data[5] != 1 or int.from_bytes(data[18:20], 'little') != 62):
         raise SampleError(f'{path}: expected little-endian x86-64 ELF64')
     try:
-        output = subprocess.check_output(['readelf', '-Wl', str(path)],
-                                         text=True,
-                                         stderr=subprocess.PIPE,
-                                         timeout=30)
+        output = subprocess.check_output(
+            ['readelf', '-Wl', str(path)],
+            text=True,
+            stderr=subprocess.PIPE,
+            timeout=30)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
             FileNotFoundError) as exc:
         raise SampleError(f'{path}: readelf failed: {exc}') from exc
@@ -67,10 +68,14 @@ def _patterns(args) -> tuple[str, list[Pattern]]:
         pack = json.loads(pack_path.read_text(encoding='utf-8'))
         if pack.get('cve') != args.cve:
             raise SampleError('pack CVE differs from requested CVE')
-        validate_source_pack(pack, pack_path.parent / 'rules-exec.yar',
+        validate_source_pack(pack,
+                             pack_path.parent / 'rules-exec.yar',
                              packfile=pack_path)
-        strings = [rule['hex'] for record in pack['records']
-                   for rule in record['rules']]
+        strings = [
+            rule['hex']
+            for record in pack['records']
+            for rule in record['rules']
+        ]
         return 'existing-cve-pack', [Pattern.from_hex(x) for x in strings]
     strings = [normalized_hex(x) for x in args.hex]
     if not strings:
@@ -78,7 +83,8 @@ def _patterns(args) -> tuple[str, list[Pattern]]:
     for string in strings:
         length, fixed = analyze_hex(string)
         if length < 28 or fixed < 24:
-            raise SampleError('each mask requires >=28 bytes and >=24 fixed bytes')
+            raise SampleError(
+                'each mask requires >=28 bytes and >=24 fixed bytes')
     return 'proposed-hex', [Pattern.from_hex(x) for x in strings]
 
 
@@ -87,7 +93,8 @@ def evaluate(cve: str, manifest: Path, patterns: list[Pattern],
     if not _CVE.fullmatch(cve):
         raise SampleError('invalid CVE ID')
     specification = json.loads(manifest.read_text(encoding='utf-8'))
-    if specification.get('schema_version') != 1 or specification.get('cve') != cve:
+    if specification.get('schema_version') != 1 or specification.get(
+            'cve') != cve:
         raise SampleError('invalid sample manifest schema or CVE')
     entries = specification.get('samples')
     if not isinstance(entries, list) or not entries:
@@ -107,7 +114,8 @@ def evaluate(cve: str, manifest: Path, patterns: list[Pattern],
         if not isinstance(digest, str) or not _HASH.fullmatch(digest):
             raise SampleError(f'{sid}: invalid pinned sha256')
         if digest in seen_digests:
-            raise SampleError(f'{sid}: repeated binary digest is not a new sample')
+            raise SampleError(
+                f'{sid}: repeated binary digest is not a new sample')
         if not item.get('label_basis') or not item.get('origin'):
             raise SampleError(f'{sid}: origin and ground-truth basis required')
         name = item.get('path')
@@ -125,8 +133,10 @@ def evaluate(cve: str, manifest: Path, patterns: list[Pattern],
         regions = _executable_regions(path)
         hit_details = []
         for index, pattern in enumerate(patterns):
-            hit_details.extend({'pattern_index': index, 'file_offset': offset}
-                               for offset in pattern.search(regions))
+            hit_details.extend({
+                'pattern_index': index,
+                'file_offset': offset
+            } for offset in pattern.search(regions))
         hit_details.sort(key=lambda h: (h['file_offset'], h['pattern_index']))
         expected = label == 'affected'
         observed = bool(hit_details)
@@ -148,18 +158,29 @@ def evaluate(cve: str, manifest: Path, patterns: list[Pattern],
     # presents a positive-only set as a successful discriminating signature.
     passed = all(item['passed'] for item in results)
     return {
-        'schema_version': 1,
-        'cve': cve,
-        'method': 'reference-match/executable-PT_LOAD',
-        'source': origin,
-        'status': 'PASS_PRELIMINARY' if passed else 'FAIL_PRELIMINARY',
-        'native_yara_x_executed': False,
-        'production_admission': False,
-        'counts': dict(sorted(counts.items())),
-        'pattern_count': len(patterns),
-        'patterns_sha256': hashlib.sha256(
-            '\n'.join(p.to_hex() for p in patterns).encode('ascii')).hexdigest(),
-        'results': results,
+        'schema_version':
+            1,
+        'cve':
+            cve,
+        'method':
+            'reference-match/executable-PT_LOAD',
+        'source':
+            origin,
+        'status':
+            'PASS_PRELIMINARY' if passed else 'FAIL_PRELIMINARY',
+        'native_yara_x_executed':
+            False,
+        'production_admission':
+            False,
+        'counts':
+            dict(sorted(counts.items())),
+        'pattern_count':
+            len(patterns),
+        'patterns_sha256':
+            hashlib.sha256('\n'.join(
+                p.to_hex() for p in patterns).encode('ascii')).hexdigest(),
+        'results':
+            results,
     }
 
 
@@ -168,19 +189,30 @@ def main(argv=None) -> int:
     parser.add_argument('--cve', required=True)
     parser.add_argument('--samples', required=True, type=Path)
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--hex', action='append', help='candidate byte mask; repeat for variants')
-    group.add_argument('--pack', type=Path, help='CVE pack.json and adjacent canonical YARA rules')
+    group.add_argument('--hex',
+                       action='append',
+                       help='candidate byte mask; repeat for variants')
+    group.add_argument('--pack',
+                       type=Path,
+                       help='CVE pack.json and adjacent canonical YARA rules')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         source, patterns = _patterns(args)
         result = evaluate(args.cve, args.samples, patterns, source)
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + '\n',
+        args.output.write_text(json.dumps(result, indent=2, sort_keys=True) +
+                               '\n',
                                encoding='utf-8')
-        print(json.dumps({'cve': args.cve, 'status': result['status'],
-                          'results': len(result['results']),
-                          'report': str(args.output)}, sort_keys=True))
+        print(
+            json.dumps(
+                {
+                    'cve': args.cve,
+                    'status': result['status'],
+                    'results': len(result['results']),
+                    'report': str(args.output)
+                },
+                sort_keys=True))
         return 0 if result['status'] == 'PASS_PRELIMINARY' else 2
     except (OSError, ValueError, TypeError, KeyError,
             subprocess.CalledProcessError) as exc:
