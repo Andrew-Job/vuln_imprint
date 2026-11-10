@@ -61,11 +61,9 @@ cache presence alone is never evidence of CVE accuracy or upstream trust.
   Installed from PyPI for Python/native test jobs. These
   are build/research tools, not runtime components of the distributed scanner.
   No separate Git submodule checkout is needed for versioned Python wheels.
-- `scripts/install_syft.sh` downloads the upstream **Syft 1.57.0** Linux
-  x86-64 archive from `anchore/syft`, checks the immutable GitHub release and
-  the downloaded archive's release attestation, then verifies the SHA-256
-  published in that release's checksum list. GitHub CLI and authorization are
-  required for this verification. Syft is build-time only.
+- `scripts/install_syft.sh` downloads the pinned **Syft 1.57.0** Linux
+  x86-64 archive from `anchore/syft` and checks its SHA-256 against the
+  upstream release checksum list. Syft is used only during release builds.
 - The product archive includes the pinned upstream YARA-X `Cargo.lock` so Syft
   can discover Rust dependencies from the *shipped* provenance material. The
   SPDX document is generated from the finalized product archive and then
