@@ -120,9 +120,7 @@ def dummy_db(path):
         'engine': {
             'name': 'yara-x-capi',
             'version': '1.23.0',
-            'serialized_rules_format': 'yara-x',
-            'scanner_min_version': '0.1.0',
-            'scanner_max_exclusive': '0.2.0'
+            'serialized_rules_format': 'yara-x'
         },
     }
     (path / 'manifest.json').write_text(json.dumps(manifest))

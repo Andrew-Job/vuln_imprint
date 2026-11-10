@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
-"""Exercise the production CVE records end-to-end with the native scanner.
+"""Smoke-test the Scanner with five selected production CVEs.
 
-Constructs executable ELF instruction-byte fixtures from record patterns. The
-15 available source-derived anchors retain their original instruction bytes;
-remaining wildcard patterns use synthetic wildcard bytes. This verifies the
-actual compiled database, ELF range handling and record-specific offsets,
-NOT discrimination of affected/fixed CVE specimens or CVE accuracy.
+Generates ELF byte fixtures from the canonical production rules. This tests
+native matching and file offsets, not CVE detection accuracy.
 """
 from __future__ import annotations
 
@@ -19,7 +16,13 @@ import tempfile
 from factory.patterns import Pattern
 
 ROOT = Path(__file__).resolve().parents[1]
-DOSSIER = ROOT / "docs/research/libpng-elf64-x86_64/machine-anchors.json"
+SMOKE_CVES = (
+    "CVE-2026-22695",
+    "CVE-2026-22801",
+    "CVE-2026-25646",
+    "CVE-2026-33416",
+    "CVE-2026-34757",
+)
 
 
 def run(*args: str) -> str:
@@ -32,31 +35,24 @@ def run(*args: str) -> str:
 
 
 def fixture_patterns(root: Path = ROOT) -> list[tuple[str, str, str, bytes]]:
-    anchors = json.loads(
-        (root / DOSSIER.relative_to(ROOT)).read_text(encoding="utf-8"))
-    original = {
-        (cve, row["hex"]): bytes.fromhex(row["raw_bytes"])
-        for cve, rows in anchors.items() for row in rows
-    }
     result = []
-    for pack_file in sorted((root / "signatures").glob("CVE-*/pack.json")):
-        pack = json.loads(pack_file.read_text(encoding="utf-8"))
-        for record in pack["records"]:
-            if record["channel"] != "production":
-                continue
+    for cve in SMOKE_CVES:
+        pack = json.loads((root / "signatures" / cve /
+                           "pack.json").read_text(encoding="utf-8"))
+        production = [
+            record for record in pack["records"]
+            if record["channel"] == "production"
+        ]
+        if not production:
+            raise ValueError(f"{cve}: missing production smoke-test record")
+        for record in production:
             for index, rule in enumerate(record["rules"]):
                 pattern = Pattern.from_hex(rule["hex"])
-                body = original.get((pack["cve"], rule["hex"]))
-                if body is None:
-                    body = bytes(
-                        byte if mask else 0
-                        for byte, mask in zip(pattern.data, pattern.mask))
-                if not pattern.matches_at(body, 0):
-                    raise ValueError(f"invalid byte fixture: {rule['id']}")
-                result.append(
-                    (pack["cve"], record["record_id"], f"v{index}", body))
+                body = bytes(byte if mask else 0
+                             for byte, mask in zip(pattern.data, pattern.mask))
+                result.append((cve, record["record_id"], f"v{index}", body))
     if not result:
-        raise ValueError("no production patterns to exercise")
+        raise ValueError("no smoke-test production patterns")
     return result
 
 

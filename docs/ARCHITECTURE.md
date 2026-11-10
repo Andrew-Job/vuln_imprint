@@ -39,9 +39,8 @@ format support.
 
 Each backend must correctly select executable ranges, preserve original file
 offsets, handle malformed inputs, validate compatible signature profiles and
-have representative native tests. See the [Platform roadmap](ROADMAP.md)
-for contribution opportunities. Published release assets specify the runtime
-and target environments of the distributed packages.
+have representative native tests. Published release assets specify the runtime and target environments
+of the distributed packages.
 
 ## Executable-range policy: ELF backend
 

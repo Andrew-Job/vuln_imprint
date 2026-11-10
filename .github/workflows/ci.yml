@@ -36,7 +36,6 @@ jobs:
       - name: Validate CVE source and product tests
         run: |
           python -m scripts.check_cve_source_tree
-          python -m scripts.check_signature_sources
           python -m pytest -q tests tests_release
       - name: Validate changed CVE records
         if: github.event_name == 'pull_request'

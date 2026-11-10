@@ -14,7 +14,7 @@ source records used to research, validate and contribute detections.
 [Quick start](#quick-start) ·
 [Create a CVE signature](docs/CREATING_AND_VALIDATING_CVE_MASKS.md) ·
 [Contribute a CVE](https://github.com/Andrew-Job/vuln_imprint/issues/new?template=cve_signature.yml) ·
-[Roadmap](docs/ROADMAP.md)
+[Release versioning](docs/VERSIONING.md)
 
 ## Quick start
 
@@ -40,9 +40,8 @@ Replace its path with a binary you want to inspect, or use `--recursive` to
 scan a directory. Findings are returned as JSON. The distributed scanner
 and signature database do not require a separate Factory installation.
 
-The current Scanner supports Linux ELF64 x86-64 (System V AMD64 ABI),
-including `ET_REL`, `ET_EXEC` and `ET_DYN`. Additional platforms and
-architectures are open for contributions. The Linux package requires a
+The Linux Scanner supports ELF64 x86-64 (System V AMD64 ABI),
+including `ET_REL`, `ET_EXEC` and `ET_DYN`. The Linux package requires a
 compatible system runtime, including glibc and OpenSSL. See
 [Release verification](docs/RELEASE_SIGNING.md) for provenance and SBOM checks.
 
@@ -90,8 +89,8 @@ Python Signature Factory supports the research and validation workflow.
 CVE-owned source records are maintained in Git and assembled into the
 compiled database distributed with each release.
 
-See [Architecture](docs/ARCHITECTURE.md), [Database](docs/DATABASE.md),
-[Development](docs/DEVELOPMENT.md) and the [Roadmap](docs/ROADMAP.md).
+See [Architecture](docs/ARCHITECTURE.md), [Database](docs/DATABASE.md)
+and [Development](docs/DEVELOPMENT.md).
 
 VulnImprint is licensed under MIT. See [Security](SECURITY.md),
 [Dependencies](docs/DEPENDENCIES.md) and

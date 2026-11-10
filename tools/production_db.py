@@ -851,8 +851,6 @@ def assemble_git_tree(signatures: Path,
                     'name': 'yara-x-capi',
                     'version': ENGINE_VERSION,
                     'serialized_rules_format': 'yara-x',
-                    'scanner_min_version': '0.1.0',
-                    'scanner_max_exclusive': '0.2.0',
                 },
             })
         (work / 'SHA256SUMS').write_text(''.join(
@@ -882,12 +880,9 @@ def verify_release(directory: Path, *, scanner: Path | None = None) -> dict:
     if manifest.get('profile') != PROFILE_ID or manifest.get('engine') != {
             'name': 'yara-x-capi',
             'version': ENGINE_VERSION,
-            'serialized_rules_format': 'yara-x',
-            'scanner_min_version': '0.1.0',
-            'scanner_max_exclusive': '0.2.0'
+            'serialized_rules_format': 'yara-x'
     }:
-        raise ReleaseRejected(
-            'DB profile or native scanner/engine compatibility mismatch')
+        raise ReleaseRejected('DB engine or platform profile mismatch')
     expected_artifacts = {
         'database.yarc', 'database.yar', 'index.json', 'database-report.json'
     }

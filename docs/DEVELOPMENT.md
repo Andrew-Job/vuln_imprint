@@ -5,8 +5,7 @@
 The release CI uses Ubuntu 24.04 x86-64, a C++20 compiler, CMake, Ninja,
 `pkg-config`, OpenSSL development headers, GNU binutils, Python 3.12+,
 Rust 1.99.1, `cargo-c` 0.10.26 and the pinned Git submodules ELFIO 3.12 and
-YARA-X 1.23.0. These are reproducible build dependencies, not a statement
-about the product's long-term platform coverage. The native Scanner uses
+YARA-X 1.23.0. The native Scanner uses
 the official YARA-X C API.
 
 A source archive does not contain a compiled C API. VulnImprint builds
@@ -39,12 +38,6 @@ source using Maturin. It uses the `release-lto` Cargo profile and the same
 target directory as the C API to reuse compiled Rust dependencies. An
 independently downloaded Python wheel is not used for this integration.
 
-CI installs Rust once using a dedicated GitHub Action and installs the pinned
-`cargo-c` once per runner. `Swatinem/rust-cache` caches Cargo downloads,
-installed tools and reusable dependency artifacts. Only `main` writes this
-cache; pull requests and tag builds restore available entries. A cache miss
-never changes the requested dependency versions or the test contract.
-
 ## First-party formatting
 
 C++ uses the Google `clang-format` preset with four-space indentation in
@@ -69,7 +62,6 @@ databases. A formatting run does not establish test or CI success.
 make test
 make test-native
 python -m scripts.check_cve_source_tree
-python -m scripts.check_signature_sources
 python -m tools.production_db assemble --signatures signatures \
   --channel test --output build/db-test \
   --scanner build/scanner/vulnimprint-scan
@@ -83,14 +75,11 @@ the native ELFIO adapter and installed YARA-X Python binding. A skipped
 mandatory test is an error. The YARA-X C API smoke test is separately
 executed by `bootstrap_yarax.sh` and by native CI.
 
-Native CI compiles and scans a generated ELF using the actual production CVE
-rules to verify record identifiers, pattern offsets and executable-range
-selection. This verifies the adapter and concrete database content, not
-whether those patterns distinguish affected from fixed third-party binaries.
-The signature-source check validates production rule syntax and recorded
-machine-code anchors. Refer to the
-[research dossiers](research/libpng-elf64-x86_64/README.md) for specimen sets,
-validation methods and observations associated with specific investigations.
+Native CI tests Scanner matching and executable-range handling using a
+small selection of CVEs read directly from production records. This does not
+establish vulnerability-detection accuracy. See the
+[research evidence](research/libpng-elf64-x86_64/README.md) for recorded
+specimens and observations.
 
 The separate `production_db review` workflow accepts per-record affected,
 fixed and unrelated sample controls bound to each `record_sha256`. This
