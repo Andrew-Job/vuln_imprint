@@ -66,7 +66,7 @@ one such case, see the [libpng research dossier](research/libpng-elf64-x86_64/RE
 The profile is part of each CVE record's detection scope. Extending the set of
 recognized profiles requires coordinated support in Scanner, Factory,
 source validation and native integration tests. A JSON metadata edit alone
-is insufficient. See the [Platform roadmap](ROADMAP.md).
+is insufficient. See [Architecture](ARCHITECTURE.md).
 
 ## Review and assembly
 
@@ -119,22 +119,8 @@ is the number of unique CVEs with findings. Release packages contain a
 matching Scanner and database under `vulnimprint/share/vulnimprint/db/`,
 verified by the installed launcher.
 
-## Manual authoring
+## Create a signature
 
-To obtain and screen new machine-code masks from either ready-made binaries or
-source-built ELF pairs, use the [CVE signature guide](CREATING_AND_VALIDATING_CVE_MASKS.md).
-The commands below only create the final CVE-owned database record.
-
-```bash
-python -m tools.manual_rules init \
-  --cve CVE-2026-12345 --record-key variant-a --channel test \
-  --hex 'AA BB CC DD EE FF 00 11 22 33 44 55 66 77 88 99 00 11 22 33 44 55 66 77 88 99 00 11' \
-  --output run/cve-proposals/CVE-2026-12345
-python -m tools.manual_rules lint \
-  --directory run/cve-proposals/CVE-2026-12345
-```
-
-Use a separate stable `--record-key` for each independent record within a
-CVE. The initializer generates `pack.json` and `rules-exec.yar` together.
-Source lint and real YARA-X compilation are mandatory; they do not assert
-that synthetic or newly authored bytes detect a vulnerability.
+Follow the [CVE signature guide](CREATING_AND_VALIDATING_CVE_MASKS.md) to
+obtain binaries, extract machine patterns, validate controls and create the
+`pack.json` and `rules-exec.yar` files.
