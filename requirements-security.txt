@@ -1,3 +1,3 @@
 # Security tooling versions are reviewed and updated by dependency PRs.
-bandit==1.8.6
+bandit==1.9.4
 PyYAML==6.0.3
