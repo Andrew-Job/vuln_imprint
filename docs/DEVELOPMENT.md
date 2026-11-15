@@ -75,11 +75,13 @@ the native ELFIO adapter and installed YARA-X Python binding. A skipped
 mandatory test is an error. The YARA-X C API smoke test is separately
 executed by `bootstrap_yarax.sh` and by native CI.
 
-Native CI tests Scanner matching and executable-range handling using a
-small selection of CVEs read directly from production records. This does not
-establish vulnerability-detection accuracy. See the
-[research evidence](research/libpng-elf64-x86_64/README.md) for recorded
-specimens and observations.
+Native CI compiles and scans a generated ELF using the actual production CVE
+rules to verify record identifiers, pattern offsets and executable-range
+selection. This verifies the adapter and concrete database content, not
+whether those patterns distinguish affected from fixed third-party binaries.
+The signature-source check validates production rule syntax and recorded
+machine-code anchors. CVE-specific fix references, verified sample digests,
+match offsets and scope limits are recorded with production signatures.
 
 The separate `production_db review` workflow accepts per-record affected,
 fixed and unrelated sample controls bound to each `record_sha256`. This
