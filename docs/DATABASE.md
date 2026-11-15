@@ -57,8 +57,10 @@ that particular compiled database. Consult the corresponding release
 artifacts for its exact coverage rather than relying on a static count in
 this document.
 
-Research dossiers document reproducible observations and test specimens. For
-one such case, see the [libpng research dossier](research/libpng-elf64-x86_64/README.md).
+Production signatures include CVE-specific source references, binary sample
+digests, observed offsets and coverage limitations in their source records.
+Detailed specimen matrices remain part of the review process, not the product
+documentation.
 
 ## Platform profiles
 

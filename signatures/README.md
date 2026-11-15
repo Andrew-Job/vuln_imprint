@@ -14,9 +14,10 @@ patterns. Records belong to exactly one CVE, even when patterns are identical.
 | `test` | Included | Excluded |
 | `production` | Included | Included |
 
-The channel selects which database includes a record. Detection quality and
-supported binary variants are documented in the corresponding evidence under
-[`docs/research/`](../docs/research/).
+The channel selects which database includes a record. Production records
+document supported binary forms, fix references and representative verified
+sample digests in their `notes`. Channel selection alone does not establish
+CVE detection quality.
 
 For the record format and database assembly, see [Database](../docs/DATABASE.md).
 For creating signatures, see the [CVE guide](../docs/CREATING_AND_VALIDATING_CVE_MASKS.md).
