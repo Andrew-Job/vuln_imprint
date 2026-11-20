@@ -1,2 +1,2 @@
 # Pinned coverage instrumentation for VulnImprint-owned Python code.
-coverage==7.17.2
+coverage==7.17.3
